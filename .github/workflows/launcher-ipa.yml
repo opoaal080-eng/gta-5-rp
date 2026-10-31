@@ -34,11 +34,11 @@ jobs:
       - name: Package test IPA (ad-hoc; re-sign for installation)
         run: |
           set -euo pipefail
-          APP="$RUNNER_TEMP/gta5rp-derived/Build/Products/Release-iphoneos/GTA5RPLauncher.app"
-          test -f "$APP/GTA5RPLauncher"
+          APP="$RUNNER_TEMP/gta5rp-derived/Build/Products/Release-iphoneos/GTA5RP Mobile.app"
+          test -f "$APP/GTA5RP Mobile"
           mkdir -p Payload artifact
           cp -R "$APP" Payload/
-          codesign --force --sign - "Payload/GTA5RPLauncher.app"
+          codesign --force --sign - "Payload/GTA5RP Mobile.app"
           /usr/bin/zip -qyr artifact/GTA5RP-Mobile-Launcher.ipa Payload
           unzip -t artifact/GTA5RP-Mobile-Launcher.ipa
           ls -lh artifact/
