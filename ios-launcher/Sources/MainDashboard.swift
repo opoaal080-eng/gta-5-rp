@@ -12,6 +12,7 @@ private enum LauncherSection: String, CaseIterable {
     case servers = "Серверы"
     case downloads = "Загрузка"
     case news = "Новости"
+    case observe = "Мир"
     case profile = "Профиль"
     var symbol: String {
         switch self {
@@ -19,6 +20,7 @@ private enum LauncherSection: String, CaseIterable {
         case .servers: return "server.rack"
         case .downloads: return "arrow.down.to.line"
         case .news: return "newspaper"
+        case .observe: return "person.3.fill"
         case .profile: return "person.crop.circle"
         }
     }
@@ -38,6 +40,9 @@ struct MainDashboard: View {
     @State private var tab: LauncherSection = .home
     @State private var showGameAlert = false
     @StateObject private var assets = GameAssets()
+    @StateObject private var live = LiveServerMonitor()
+    @StateObject private var observer = PlayerObserver()
+    @AppStorage("rpCoordinatesFeed") private var coordinatesFeed = ""
 
     private let servers: [RPServer] = [
         .init(name: "Eclipse", emoji: "🌘"),
@@ -60,6 +65,7 @@ struct MainDashboard: View {
                     case .servers: serversView
                     case .downloads: downloadsView
                     case .news: newsView
+                    case .observe: observeView
                     case .profile: profileView
                     }
                 }
@@ -73,6 +79,12 @@ struct MainDashboard: View {
         }
         .background(RPTheme.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .task {
+            while !Task.isCancelled {
+                await live.refresh()
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            }
+        }
         .alert("Подключение пока недоступно", isPresented: $showGameAlert) {
             Button("Понятно", role: .cancel) {}
         } message: {
@@ -112,12 +124,12 @@ struct MainDashboard: View {
                 tile(title: "ИГРАТЬ", symbol: "arrow.up.right", color: RPTheme.orange) {
                     showGameAlert = true
                 }
-                tile(title: "СЕЙЧАС ИГРАЮТ", subtitle: "Нет данных", symbol: "person.2", color: RPTheme.panel, action: nil)
+                tile(title: "СЕЙЧАС ИГРАЮТ", subtitle: live.projectOnline.map { $0.formatted() } ?? "Нет данных", symbol: "person.2", color: RPTheme.panel, action: nil)
             }
             HStack(spacing: 11) {
                 cityCard
-                tile(title: "СКАЧАТЬ\nФАЙЛЫ", symbol: "arrow.down.to.line", color: RPTheme.orange) {
-                    tab = .downloads
+                tile(title: "ПРОСМОТР\nИГРОКОВ", symbol: "person.3.fill", color: RPTheme.orange) {
+                    tab = .observe
                 }
             }
             HStack(spacing: 16) {
@@ -289,6 +301,13 @@ struct MainDashboard: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(server.name).font(.system(size: 20, weight: .bold))
                             Text(server.host).font(.system(size: 11)).foregroundStyle(RPTheme.muted)
+                            if let current = live.snapshot(for: server.name) {
+                                Text("Онлайн: \(current.players.formatted()) / \(current.maxPlayers.formatted())")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(RPTheme.orange)
+                            } else {
+                                Text("Онлайн: нет данных").font(.caption2).foregroundStyle(RPTheme.muted)
+                            }
                         }
                         Spacer(minLength: 0)
                         Image(systemName: selectedServer == server.name ? "checkmark.circle.fill" : "circle")
@@ -300,8 +319,74 @@ struct MainDashboard: View {
                 }
                 .buttonStyle(.plain)
             }
+            Button("ОБНОВИТЬ СТАТИСТИКУ") { Task { await live.refresh() } }
+                .font(.system(size: 13, weight: .bold)).foregroundStyle(RPTheme.orange)
+                .disabled(live.fetching)
+            if let updated = live.refreshed {
+                Text("Источник: RAGE MP masterlist · \(updated.formatted(date: .omitted, time: .standard))")
+                    .font(.caption2).foregroundStyle(RPTheme.muted)
+            }
+            if let failure = live.error {
+                Text(failure).font(.caption).foregroundStyle(.orange)
+            }
             Text("Адреса указаны для справки. Клиент GTA5RP/RAGE MP пока не интегрирован.")
                 .font(.caption).foregroundStyle(RPTheme.muted)
+        }
+    }
+
+    private var observeView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeading("НАБЛЮДЕНИЕ", detail: "Онлайн без игровых ресурсов GTA V")
+            VStack(alignment: .leading, spacing: 10) {
+                Text("СЕРВЕР: \(selectedServer.uppercased())")
+                    .font(.system(size: 14, weight: .black)).foregroundStyle(RPTheme.orange)
+                if let current = live.snapshot(for: selectedServer) {
+                    Text("\(current.players.formatted()) / \(current.maxPlayers.formatted())")
+                        .font(.system(size: 42, weight: .black))
+                    Text("Игроков онлайн по публичной статистике RAGE MP")
+                        .font(.caption).foregroundStyle(RPTheme.muted)
+                    Text("Адрес: \(current.address)")
+                        .font(.caption2).foregroundStyle(RPTheme.muted).textSelection(.enabled)
+                } else {
+                    Text("Нет данных об онлайне").font(.system(size: 23, weight: .bold))
+                    Text(live.error ?? "Обнови публичную статистику")
+                        .font(.caption).foregroundStyle(RPTheme.muted)
+                }
+                Button {
+                    Task { await live.refresh() }
+                } label: {
+                    actionLabel("ОБНОВИТЬ ОНЛАЙН", symbol: "arrow.clockwise")
+                }.disabled(live.fetching)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RPTheme.panel, in: RoundedRectangle(cornerRadius: 15))
+
+            Text("ИГРОКИ В 3D").font(.system(size: 22, weight: .black))
+            PlayerWorldView(players: observer.players)
+            Text("Публичный список RAGE MP не содержит положения или имён игроков. Реальные персонажи появятся только при доступном и разрешённом сервером API координат. Никаких искусственных NPC.")
+                .font(.caption)
+                .foregroundStyle(RPTheme.muted)
+
+            VStack(alignment: .leading, spacing: 11) {
+                Text("ИСТОЧНИК КООРДИНАТ").font(.system(size: 13, weight: .bold))
+                TextField("https://example.com/players.json", text: $coordinatesFeed)
+                    .font(.system(size: 13))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .padding(12)
+                    .background(RPTheme.background, in: RoundedRectangle(cornerRadius: 10))
+                Button {
+                    Task { await observer.fetch(coordinatesFeed) }
+                } label: {
+                    actionLabel("ПОЛУЧИТЬ ПОЗИЦИИ", symbol: "location")
+                }.disabled(observer.busy || coordinatesFeed.isEmpty)
+                Text(observer.status).font(.caption).foregroundStyle(RPTheme.muted)
+                Text("Формат: {\"players\":[{\"id\":\"1\",\"name\":\"Player\",\"x\":0,\"y\":0,\"z\":0}]}")
+                    .font(.caption2).foregroundStyle(RPTheme.muted).textSelection(.enabled)
+            }
+            .padding(16)
+            .background(RPTheme.panel, in: RoundedRectangle(cornerRadius: 15))
         }
     }
 
@@ -375,7 +460,7 @@ struct MainDashboard: View {
                 .autocorrectionDisabled()
                 .padding(14)
                 .background(RPTheme.panel, in: RoundedRectangle(cornerRadius: 12))
-            infoCard("СБОРКА 0.2", body: "Обновлённый дизайн, выбор сервера и загрузка ресурсов. Игра не встроена. Это неофициальное приложение.")
+            infoCard("СБОРКА 0.3", body: "Публичный онлайн GTA5RP, подготовка облегчённого 3D-просмотра по разрешённому API координат. Игра не встроена. Это неофициальное приложение.")
             linkCard(title: "GTA5RP.COM", detail: "Личный кабинет на сайте проекта", symbol: "person.crop.circle", url: "https://gta5rp.com/")
         }
     }
