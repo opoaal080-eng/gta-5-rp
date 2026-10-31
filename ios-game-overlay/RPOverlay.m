@@ -5,6 +5,8 @@
 #import <netdb.h>
 #import <unistd.h>
 #import <arpa/inet.h>
+#import <errno.h>
+#import <string.h>
 static UIColor *orange(void){return [UIColor colorWithRed:1 green:.40 blue:.10 alpha:1];}
 static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.082 alpha:1];}
 @interface RPHUDWindow : UIWindow
@@ -29,6 +31,9 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
 @property(nonatomic,strong) UITextField *server;
 @property(nonatomic,strong) UITextField *host;
 @property(nonatomic,strong) NSURLSessionDataTask *task;
+@property(nonatomic,strong) NSLayoutConstraint *buttonCenterY;
+@property(nonatomic,strong) NSLayoutConstraint *buttonBottom;
+@property(nonatomic) BOOL probing;
 @end
 @implementation RPHUDController
 - (UIButton *)button:(NSString *)text click:(SEL)action {
@@ -65,10 +70,14 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  UIButton *launch=[self button:@"★ RP" click:@selector(toggle)];self.launchButton=launch;
  launch.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:launch];
  [NSLayoutConstraint activateConstraints:@[
- [launch.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12],
- [launch.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-18],
- [launch.widthAnchor constraintEqualToConstant:78],
- [launch.heightAnchor constraintEqualToConstant:44]]];
+ [launch.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
+ [launch.widthAnchor constraintEqualToConstant:74],
+ [launch.heightAnchor constraintEqualToConstant:46]]];
+ // Landscape: floating control at the center of the right edge.
+ // Portrait: keep it near the bottom-right. Autolayout handles safe-area cutouts.
+ self.buttonCenterY=[launch.centerYAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerYAnchor];
+ self.buttonBottom=[launch.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-18];
+ [self updateButtonPlacement];
  UIView *menu=[UIView new];self.menu=menu;menu.hidden=YES;menu.backgroundColor=dark();
  menu.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:menu];
  [NSLayoutConstraint activateConstraints:@[
@@ -86,11 +95,13 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  UIStackView *stack=[UIStackView new];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=13;
  stack.translatesAutoresizingMaskIntoConstraints=NO;[scroll addSubview:stack];
  [NSLayoutConstraint activateConstraints:@[
- [stack.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor constant:18],
- [stack.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor constant:-18],
- [stack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor constant:15],
- [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-30],
- [stack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-36]]];
+ [stack.centerXAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.centerXAnchor],
+ [stack.leadingAnchor constraintGreaterThanOrEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor constant:18],
+ [stack.trailingAnchor constraintLessThanOrEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor constant:-18],
+ [stack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor constant:12],
+ [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-22],
+ [stack.widthAnchor constraintLessThanOrEqualToConstant:590],
+ [stack.widthAnchor constraintLessThanOrEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-36]]];
  UILabel *title=[self label:@"★ GTA5RP MOBILE" size:27];title.textColor=orange();
  [stack addArrangedSubview:title];
  UILabel *sub=[self label:@"Диагностика RAGE MP поверх GTA V. Не является входом в игровую сессию." size:13];sub.textColor=UIColor.lightGrayColor;
@@ -109,6 +120,20 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  notice.textColor=UIColor.lightGrayColor;[stack addArrangedSubview:notice];
  UIButton *back=[self button:@"ВЕРНУТЬСЯ В GTA V ▶" click:@selector(toggle)];
  [stack addArrangedSubview:back];[back.heightAnchor constraintEqualToConstant:50].active=YES;
+}
+- (void)viewDidLayoutSubviews {
+ [super viewDidLayoutSubviews];
+ [self updateButtonPlacement];
+}
+- (void)updateButtonPlacement {
+ BOOL landscape=self.view.bounds.size.width > self.view.bounds.size.height;
+ if(landscape && self.buttonCenterY && !self.buttonCenterY.active) {
+  self.buttonBottom.active=NO;
+  self.buttonCenterY.active=YES;
+ } else if(!landscape && self.buttonBottom && !self.buttonBottom.active) {
+  self.buttonCenterY.active=NO;
+  self.buttonBottom.active=YES;
+ }
 }
 - (void)toggle {
  BOOL open=self.menu.isHidden;self.menu.hidden=!open;self.launchButton.hidden=open;
@@ -146,42 +171,105 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  }];
  [self.task resume];
 }
+- (void)appendDiagnostic:(NSString *)message {
+ if(!message.length)return;
+ NSString *current=self.networkInfo.text ?: @"";
+ self.networkInfo.text=current.length?[current stringByAppendingFormat:@"\n%@",message]:message;
+}
 - (void)probe {
+ if(self.probing)return;
+ [self.host resignFirstResponder];
  NSString *target=[self.host.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
  NSArray *parts=[target componentsSeparatedByString:@":"];
- if(parts.count>2||![(NSString *)parts.firstObject length]){self.networkInfo.text=@"Укажи домен:порт";return;}
- NSString *host=parts.firstObject;NSInteger port=parts.count==2?[parts.lastObject integerValue]:22005;
+ if(parts.count>2||![(NSString *)parts.firstObject length]){
+  self.networkInfo.text=@"Укажи домен:порт";return;
+ }
+ NSString *host=parts.firstObject;
+ NSInteger port=parts.count==2?[parts.lastObject integerValue]:22005;
  if(port<=0||port>65535){self.networkInfo.text=@"Неверный UDP-порт";return;}
- self.networkInfo.text=@"Проверяем RakNet UDP…";
+ self.probing=YES;
+ self.networkInfo.text=[NSString stringWithFormat:@"1. DNS: %@…",host];
+ NSString *portText=[NSString stringWithFormat:@"%ld",(long)port];
  __weak typeof(self) weakSelf=self;
- dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
-  struct addrinfo hints={0},*list=NULL;hints.ai_family=AF_UNSPEC;hints.ai_socktype=SOCK_DGRAM;
-  NSString *portText=[NSString stringWithFormat:@"%ld",(long)port];
-  int rc=getaddrinfo(host.UTF8String,portText.UTF8String,&hints,&list);
-  BOOL received=NO;
-  if(rc==0){
-   static const unsigned char magic[]={0,255,255,0,254,254,254,254,253,253,253,253,18,52,86,120};
-   unsigned char ping[33]={0};ping[0]=1;
-   uint64_t tick=(uint64_t)(NSDate.date.timeIntervalSince1970*1000);
-   for(int i=0;i<8;i++)ping[1+i]=(tick>>(56-8*i))&255;
-   memcpy(ping+9,magic,sizeof(magic));
-   uint64_t guid=arc4random();
-   for(int i=0;i<8;i++)ping[25+i]=(guid>>(56-8*i))&255;
-   for(struct addrinfo *entry=list;entry;entry=entry->ai_next){
-    int s=socket(entry->ai_family,SOCK_DGRAM,IPPROTO_UDP);if(s<0)continue;
-    struct timeval to={2,0};setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,&to,sizeof(to));
-    ssize_t sent=sendto(s,ping,sizeof(ping),0,entry->ai_addr,entry->ai_addrlen);
-    unsigned char pong[2048];ssize_t got=sent==sizeof(ping)?recvfrom(s,pong,sizeof(pong),0,NULL,NULL):-1;
-    close(s);
-    if(got>=35&&pong[0]==0x1c&&memcmp(pong+17,magic,16)==0){received=YES;break;}
-   }
-   freeaddrinfo(list);
-  }
+ void (^log)(NSString *)=^(NSString *message){
   dispatch_async(dispatch_get_main_queue(), ^{
-   __strong typeof(weakSelf) owner=weakSelf;if(!owner)return;
-   owner.networkInfo.text=received?@"UDP сервер ответил. Вход в GTA5RP НЕ выполнен.":
-     (rc==0?@"Не получен RakNet Pong. Это не означает, что сервер выключен.":@"DNS-адрес не найден.");
+   __strong typeof(weakSelf) owner=weakSelf;
+   if(owner)[owner appendDiagnostic:message];
   });
+ };
+ dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
+  struct addrinfo hints={0},*addresses=NULL;
+  hints.ai_family=AF_UNSPEC;
+  hints.ai_socktype=SOCK_DGRAM;
+  hints.ai_protocol=IPPROTO_UDP;
+  int dns=getaddrinfo(host.UTF8String,portText.UTF8String,&hints,&addresses);
+  if(dns!=0){
+   log([NSString stringWithFormat:@"✕ DNS: %s",gai_strerror(dns)]);
+   dispatch_async(dispatch_get_main_queue(),^{weakSelf.probing=NO;});
+   return;
+  }
+  NSMutableArray<NSString *> *ips=[NSMutableArray array];
+  for(struct addrinfo *p=addresses;p;p=p->ai_next){
+   char ip[NI_MAXHOST]={0};
+   if(getnameinfo(p->ai_addr,(socklen_t)p->ai_addrlen,ip,sizeof(ip),NULL,0,NI_NUMERICHOST)==0)
+    [ips addObject:[NSString stringWithUTF8String:ip]];
+  }
+  log([NSString stringWithFormat:@"✓ DNS: %@",ips.count?[ips componentsJoinedByString:@", "]:@"пустой ответ"]);
+  static const unsigned char magic[16]={0,255,255,0,254,254,254,254,253,253,253,253,18,52,86,120};
+  BOOL sentAny=NO,replyAny=NO,valid=NO;
+  NSUInteger attempted=0;
+  for(struct addrinfo *p=addresses;p&&attempted<4;p=p->ai_next){
+   if(p->ai_family!=AF_INET&&p->ai_family!=AF_INET6)continue;
+   attempted++;
+   int fd=socket(p->ai_family,SOCK_DGRAM,IPPROTO_UDP);
+   if(fd<0){
+    log([NSString stringWithFormat:@"✕ UDP socket: %s",strerror(errno)]);
+    continue;
+   }
+   struct timeval timeout={2,0};
+   setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
+   unsigned char ping[33]={0};
+   ping[0]=0x01;
+   uint64_t timestamp=(uint64_t)(NSDate.date.timeIntervalSince1970*1000);
+   for(int i=0;i<8;i++)ping[1+i]=(timestamp>>(56-i*8))&255;
+   memcpy(ping+9,magic,sizeof(magic));
+   uint64_t guid=((uint64_t)arc4random()<<32)|arc4random();
+   for(int i=0;i<8;i++)ping[25+i]=(guid>>(56-i*8))&255;
+   CFAbsoluteTime began=CFAbsoluteTimeGetCurrent();
+   ssize_t bytes=sendto(fd,ping,sizeof(ping),0,p->ai_addr,(socklen_t)p->ai_addrlen);
+   if(bytes!=sizeof(ping)){
+    log([NSString stringWithFormat:@"✕ UDP отправка: %s",strerror(errno)]);
+    close(fd);continue;
+   }
+   sentAny=YES;
+   log([NSString stringWithFormat:@"2. UDP: отправлено %zd байта, адрес #%lu",bytes,(unsigned long)attempted]);
+   unsigned char pong[2048]={0};
+   ssize_t received=recvfrom(fd,pong,sizeof(pong),0,NULL,NULL);
+   int receivedErrno=errno;
+   double elapsed=(CFAbsoluteTimeGetCurrent()-began)*1000;
+   close(fd);
+   if(received<=0){
+    if(receivedErrno==EAGAIN||receivedErrno==EWOULDBLOCK)
+     log([NSString stringWithFormat:@"3. Ответ: тайм-аут %.0f мс",elapsed]);
+    else
+     log([NSString stringWithFormat:@"3. Ответ: ошибка %s",strerror(receivedErrno)]);
+    continue;
+   }
+   replyAny=YES;
+   log([NSString stringWithFormat:@"3. Получено %zd байт за %.0f мс, ID 0x%02X",received,elapsed,pong[0]]);
+   if(received>=35&&pong[0]==0x1c&&memcmp(pong+17,magic,16)==0){
+    valid=YES;
+    log(@"✓ RakNet Pong подтверждён");
+    break;
+   }
+   log(@"! Полученный пакет не соответствует ожидаемому RakNet Pong");
+  }
+  if(addresses)freeaddrinfo(addresses);
+  if(valid)log(@"Итог: UDP ответил. Вход и авторизация GTA5RP НЕ выполнены.");
+  else if(replyAny)log(@"Итог: UDP ответ есть, но протокол не подтверждён.");
+  else if(sentAny)log(@"Итог: ответ не получен. Возможно, сервер блокирует ping; это НЕ доказывает, что он выключен.");
+  else log(@"Итог: не удалось отправить UDP-пакет.");
+  dispatch_async(dispatch_get_main_queue(),^{weakSelf.probing=NO;});
  });
 }
 @end
