@@ -37,6 +37,7 @@ static void RPStunNative(const char *host, const char *port,
    report(@"Network.framework: UDP-путь готов");
    uint8_t request[20]={0,1,0,0,0x21,0x12,0xA4,0x42};
    arc4random_buf(request+8,12);
+   NSData *requestData=[NSData dataWithBytes:request length:sizeof(request)];
    CFAbsoluteTime began=CFAbsoluteTimeGetCurrent();
    nw_connection_receive_message(conn,^(dispatch_data_t content,
        nw_content_context_t context,bool is_complete,nw_error_t receiveError) {
@@ -52,7 +53,7 @@ static void RPStunNative(const char *host, const char *port,
     (void)mapped;
     const uint8_t *packet=(const uint8_t*)buffer;
     if(size<20||packet[0]!=1||packet[1]!=1||
-       memcmp(packet+4,request+4,16)!=0){
+       memcmp(packet+4,(const uint8_t *)requestData.bytes+4,16)!=0){
      report([NSString stringWithFormat:@"Native STUN: получено %zu байт, но не Binding Success",size]);
      finish(NO);return;
     }
@@ -70,7 +71,7 @@ static void RPStunNative(const char *host, const char *port,
       if(type==0x20)p^=0x2112;
       uint8_t a[4]={0};
       for(int j=0;j<4;j++)
-       a[j]=packet[i+8+j]^(type==0x20?request[4+j]:0);
+       a[j]=packet[i+8+j]^(type==0x20?((const uint8_t *)requestData.bytes)[4+j]:0);
       mappedAddress=[NSString stringWithFormat:@"%u.%u.%u.%u:%u",
                      a[0],a[1],a[2],a[3],p];
       if(type==0x20)break;
@@ -85,7 +86,7 @@ static void RPStunNative(const char *host, const char *port,
    });
    uint8_t *heap=malloc(sizeof(request));
    if(!heap){report(@"Native STUN: ошибка памяти");finish(NO);return;}
-   memcpy(heap,request,sizeof(request));
+   memcpy(heap,requestData.bytes,requestData.length);
    dispatch_data_t payload=dispatch_data_create(heap,sizeof(request),q,^{free(heap);});
    nw_connection_send(conn,payload,NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT,true,
                       ^(nw_error_t sendError) {
