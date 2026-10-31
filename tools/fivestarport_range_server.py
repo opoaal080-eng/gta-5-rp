@@ -8,7 +8,7 @@ import pathlib
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlsplit
-RANGE = re.compile(r"^bytes=(\\d*)-(\\d*)$")
+RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 def make_handler(root):
     root = pathlib.Path(root).resolve(strict=True)
     class Handler(BaseHTTPRequestHandler):
@@ -17,7 +17,7 @@ def make_handler(root):
         def serve(self, head):
             name = unquote(urlsplit(self.path).path)
             parts = name.lstrip("/").split("/")
-            if not name.startswith("/") or "\\\\" in name or any(x in ("", ".", "..") for x in parts):
+            if not name.startswith("/") or "\\" in name or any(x in ("", ".", "..") for x in parts):
                 self.send_error(400); return
             file = root.joinpath(*parts).resolve()
             if not file.is_relative_to(root) or not file.is_file():
