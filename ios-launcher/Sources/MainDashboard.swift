@@ -208,7 +208,7 @@ struct MainDashboard: View {
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.08)))
     }
 
-    private func tile(title: String, subtitle: String? = nil, symbol: String, color: Color, action: (() -> Void)?) -> some View {
+    @ViewBuilder private func tile(title: String, subtitle: String? = nil, symbol: String, color: Color, action: (() -> Void)?) -> some View {
         let body = VStack(alignment: .leading, spacing: 8) {
             if title == "СЕЙЧАС ИГРАЮТ" {
                 HStack(spacing: 7) {
