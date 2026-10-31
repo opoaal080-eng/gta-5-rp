@@ -57,7 +57,7 @@ final class LiveServerMonitor: ObservableObject {
             refreshed = Date()
             error = found.isEmpty ? "GTA5RP отсутствует в ответе masterlist. Это не означает, что серверы выключены." : nil
         } catch {
-            error = "Masterlist недоступен: \(error.localizedDescription)"
+            self.error = "Masterlist недоступен: \(error.localizedDescription)"
             // Do not show stale values as live data.
             servers = [:]
             refreshed = nil
