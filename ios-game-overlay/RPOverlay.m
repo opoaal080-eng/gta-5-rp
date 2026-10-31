@@ -1,208 +1,214 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <sys/socket.h>
-#import <netdb.h>
-#import <arpa/inet.h>
-#import <unistd.h>
 #import <sys/time.h>
-static UIColor *bg(void){return [UIColor colorWithRed:.075 green:.08 blue:.09 alpha:1];}
-static UIColor *card(void){return [UIColor colorWithRed:.14 green:.145 blue:.16 alpha:1];}
-static UIColor *orange(void){return [UIColor colorWithRed:1 green:.4 blue:.1 alpha:1];}
-@interface RPWindow:UIWindow
-@property(nonatomic,weak) UIView *launcherButton;
-@property(nonatomic) BOOL menuOpen;
+#import <netdb.h>
+#import <unistd.h>
+#import <arpa/inet.h>
+static UIColor *orange(void){return [UIColor colorWithRed:1 green:.40 blue:.10 alpha:1];}
+static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.082 alpha:1];}
+@interface RPHUDWindow : UIWindow
+@property(nonatomic,weak) UIView *launcher;
+@property(nonatomic) BOOL expanded;
 @end
-@implementation RPWindow
--(UIView*)hitTest:(CGPoint)p withEvent:(UIEvent*)e{
- if(!self.menuOpen){UIView *b=self.launcherButton;if(!b)return nil;
- CGPoint q=[self convertPoint:p toView:b];if(![b pointInside:q withEvent:e])return nil;}
+@implementation RPHUDWindow
+- (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
+ if (!self.expanded && self.launcher){
+   CGPoint q=[self convertPoint:p toView:self.launcher];
+   if (![self.launcher pointInside:q withEvent:e])return nil;
+ }
  return [super hitTest:p withEvent:e];
 }
 @end
-@interface RPController:UIViewController<UITextFieldDelegate>
-@property(nonatomic,weak) RPWindow *overlay;
-@property(nonatomic,strong) UIButton *floating;
+@interface RPHUDController : UIViewController<UITextFieldDelegate>
+@property(nonatomic,weak) RPHUDWindow *overlay;
+@property(nonatomic,strong) UIButton *launchButton;
 @property(nonatomic,strong) UIView *menu;
-@property(nonatomic,strong) UITextField *nameField;
-@property(nonatomic,strong) UITextField *hostField;
-@property(nonatomic,strong) UILabel *status;
-@property(nonatomic,strong) UILabel *online;
-@property(nonatomic,strong) UITextView *servers;
+@property(nonatomic,strong) UILabel *info;
+@property(nonatomic,strong) UILabel *networkInfo;
+@property(nonatomic,strong) UITextField *server;
+@property(nonatomic,strong) UITextField *host;
 @property(nonatomic,strong) NSURLSessionDataTask *task;
 @end
-@implementation RPController
--(UILabel*)label:(NSString*)text size:(CGFloat)size strong:(BOOL)strong{
- UILabel*l=[UILabel new];l.text=text;l.numberOfLines=0;l.textColor=UIColor.whiteColor;
- l.font=[UIFont systemFontOfSize:size weight:strong?UIFontWeightBlack:UIFontWeightRegular];return l;
-}
--(UIButton*)button:(NSString*)text action:(SEL)action bright:(BOOL)bright{
- UIButton*b=[UIButton buttonWithType:UIButtonTypeSystem];b.backgroundColor=bright?orange():card();
- b.layer.cornerRadius=12;[b setTitle:text forState:UIControlStateNormal];
+@implementation RPHUDController
+- (UIButton *)button:(NSString *)text click:(SEL)action {
+ UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem];
+ [b setTitle:text forState:UIControlStateNormal];
  [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
  b.titleLabel.font=[UIFont systemFontOfSize:15 weight:UIFontWeightHeavy];
- [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];return b;
+ b.titleLabel.adjustsFontSizeToFitWidth=YES;
+ b.backgroundColor=orange();b.layer.cornerRadius=10;
+ [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+ return b;
 }
--(UITextField*)field:(NSString*)placeholder text:(NSString*)text{
- UITextField*f=[UITextField new];f.backgroundColor=card();f.textColor=UIColor.whiteColor;
- f.layer.cornerRadius=10;f.text=text;f.font=[UIFont systemFontOfSize:15];
- f.attributedPlaceholder=[[NSAttributedString alloc]initWithString:placeholder attributes:@{NSForegroundColorAttributeName:UIColor.lightGrayColor}];
- f.autocapitalizationType=UITextAutocapitalizationTypeNone;f.autocorrectionType=UITextAutocorrectionTypeNo;
- f.delegate=self;f.returnKeyType=UIReturnKeyDone;
- f.leftView=[[UIView alloc]initWithFrame:CGRectMake(0,0,12,2)];f.leftViewMode=UITextFieldViewModeAlways;
- [f.heightAnchor constraintEqualToConstant:48].active=YES;return f;
+- (UILabel *)label:(NSString *)value size:(CGFloat)size {
+ UILabel *v=[UILabel new];v.text=value;v.textColor=UIColor.whiteColor;
+ v.font=[UIFont systemFontOfSize:size weight:UIFontWeightBold];v.numberOfLines=0;
+ return v;
 }
--(void)viewDidLoad{
+- (UITextField *)field:(NSString *)hint value:(NSString *)value {
+ UITextField *v=[UITextField new];v.placeholder=hint;v.text=value;
+ v.backgroundColor=[UIColor colorWithWhite:.17 alpha:1];v.textColor=UIColor.whiteColor;
+ v.attributedPlaceholder=[[NSAttributedString alloc]initWithString:hint attributes:@{NSForegroundColorAttributeName:UIColor.lightGrayColor}];
+ v.layer.cornerRadius=10;v.font=[UIFont systemFontOfSize:16];
+ v.autocorrectionType=UITextAutocorrectionTypeNo;
+ v.autocapitalizationType=UITextAutocapitalizationTypeNone;
+ v.returnKeyType=UIReturnKeyDone;v.delegate=self;
+ UIView *left=[[UIView alloc]initWithFrame:CGRectMake(0,0,12,2)];
+ v.leftView=left;v.leftViewMode=UITextFieldViewModeAlways;
+ [v.heightAnchor constraintEqualToConstant:46].active=YES;
+ return v;
+}
+- (BOOL)textFieldShouldReturn:(UITextField*)field{[field resignFirstResponder];return YES;}
+- (void)viewDidLoad {
  [super viewDidLoad];self.view.backgroundColor=UIColor.clearColor;
- UIButton*floatButton=[self button:@"★ RP" action:@selector(toggle) bright:YES];self.floating=floatButton;
- [self.view addSubview:floatButton];floatButton.translatesAutoresizingMaskIntoConstraints=NO;
+ UIButton *launch=[self button:@"★ RP" click:@selector(toggle)];self.launchButton=launch;
+ launch.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:launch];
  [NSLayoutConstraint activateConstraints:@[
- [floatButton.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-14],
- [floatButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
- [floatButton.widthAnchor constraintEqualToConstant:74],[floatButton.heightAnchor constraintEqualToConstant:43]]];
- UIView*menu=[UIView new];self.menu=menu;menu.backgroundColor=bg();menu.hidden=YES;
- [self.view addSubview:menu];menu.translatesAutoresizingMaskIntoConstraints=NO;
+ [launch.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12],
+ [launch.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:6],
+ [launch.widthAnchor constraintEqualToConstant:78],
+ [launch.heightAnchor constraintEqualToConstant:44]]];
+ UIView *menu=[UIView new];self.menu=menu;menu.hidden=YES;menu.backgroundColor=dark();
+ menu.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:menu];
  [NSLayoutConstraint activateConstraints:@[
- [menu.topAnchor constraintEqualToAnchor:self.view.topAnchor],[menu.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
- [menu.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[menu.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor]]];
- UIStackView*page=[UIStackView new];page.axis=UILayoutConstraintAxisVertical;
- [menu addSubview:page];page.translatesAutoresizingMaskIntoConstraints=NO;
+ [menu.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+ [menu.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+ [menu.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+ [menu.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
+ UIScrollView *scroll=[UIScrollView new];scroll.translatesAutoresizingMaskIntoConstraints=NO;
+ [menu addSubview:scroll];
  [NSLayoutConstraint activateConstraints:@[
- [page.topAnchor constraintEqualToAnchor:menu.safeAreaLayoutGuide.topAnchor],[page.bottomAnchor constraintEqualToAnchor:menu.safeAreaLayoutGuide.bottomAnchor],
- [page.leadingAnchor constraintEqualToAnchor:menu.safeAreaLayoutGuide.leadingAnchor],
- [page.trailingAnchor constraintEqualToAnchor:menu.safeAreaLayoutGuide.trailingAnchor]]];
- UIView*header=[UIView new];header.backgroundColor=card();[page addArrangedSubview:header];[header.heightAnchor constraintEqualToConstant:65].active=YES;
- UILabel*title=[self label:@"★ GTA5 RP   MOBILE" size:22 strong:YES];
- UIButton*close=[self button:@"✕" action:@selector(toggle) bright:YES];[header addSubview:title];[header addSubview:close];
- title.translatesAutoresizingMaskIntoConstraints=NO;close.translatesAutoresizingMaskIntoConstraints=NO;
+ [scroll.leadingAnchor constraintEqualToAnchor:menu.safeAreaLayoutGuide.leadingAnchor],
+ [scroll.trailingAnchor constraintEqualToAnchor:menu.safeAreaLayoutGuide.trailingAnchor],
+ [scroll.topAnchor constraintEqualToAnchor:menu.safeAreaLayoutGuide.topAnchor],
+ [scroll.bottomAnchor constraintEqualToAnchor:menu.safeAreaLayoutGuide.bottomAnchor]]];
+ UIStackView *stack=[UIStackView new];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=13;
+ stack.translatesAutoresizingMaskIntoConstraints=NO;[scroll addSubview:stack];
  [NSLayoutConstraint activateConstraints:@[
- [title.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:18],[title.centerYAnchor constraintEqualToAnchor:header.centerYAnchor],
- [title.trailingAnchor constraintLessThanOrEqualToAnchor:close.leadingAnchor constant:-6],
- [close.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-14],
- [close.centerYAnchor constraintEqualToAnchor:header.centerYAnchor],
- [close.heightAnchor constraintEqualToConstant:42],[close.widthAnchor constraintEqualToConstant:45]]];
- UIScrollView*scroll=[UIScrollView new];[page addArrangedSubview:scroll];
- UIStackView*stack=[UIStackView new];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=12;
- [scroll addSubview:stack];stack.translatesAutoresizingMaskIntoConstraints=NO;
- [NSLayoutConstraint activateConstraints:@[
- [stack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor constant:16],
- [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-24],
- [stack.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor constant:16],
- [stack.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor constant:-16],
- [stack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-32]]];
- [stack addArrangedSubview:[self label:@"СЕРВЕРЫ GTA5RP" size:27 strong:YES]];
- UILabel*description=[self label:@"Публичный онлайн RAGE MP, без загрузки игровых ресурсов." size:13 strong:NO];
- description.textColor=UIColor.lightGrayColor;[stack addArrangedSubview:description];
- self.nameField=[self field:@"Название сервера" text:@"Eclipse"];[stack addArrangedSubview:self.nameField];
- UIButton*refresh=[self button:@"ОБНОВИТЬ ОНЛАЙН" action:@selector(fetchMaster) bright:YES];
- [stack addArrangedSubview:refresh];[refresh.heightAnchor constraintEqualToConstant:51].active=YES;
- self.online=[self label:@"ОНЛАЙН: НЕТ ДАННЫХ" size:23 strong:YES];[stack addArrangedSubview:self.online];
- self.servers=[UITextView new];self.servers.editable=NO;self.servers.layer.cornerRadius=12;
- self.servers.backgroundColor=card();self.servers.textColor=UIColor.whiteColor;
- self.servers.font=[UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightMedium];
- self.servers.text=@"Каталог не загружен";[stack addArrangedSubview:self.servers];
- [self.servers.heightAnchor constraintEqualToConstant:110].active=YES;
- UILabel*network=[self label:@"RAKNET UDP · ПРОВЕРКА СЕРВЕРА" size:20 strong:YES];
- network.textColor=orange();[stack addArrangedSubview:network];
- self.hostField=[self field:@"Домен или IP:22005" text:@""];[stack addArrangedSubview:self.hostField];
- UIButton*probe=[self button:@"ПРОВЕРИТЬ UDP" action:@selector(probe) bright:YES];
- [stack addArrangedSubview:probe];[probe.heightAnchor constraintEqualToConstant:51].active=YES;
- self.status=[self label:@"UDP: адрес не указан" size:14 strong:NO];[stack addArrangedSubview:self.status];
- UIButton*back=[self button:@"ВЕРНУТЬСЯ В ИГРУ ▶" action:@selector(toggle) bright:YES];
- [stack addArrangedSubview:back];[back.heightAnchor constraintEqualToConstant:51].active=YES;
- UILabel*note=[self label:@"ТЕСТОВАЯ ВЕРСИЯ: встроенный P2P-онлайн GTA V сохранён. RAGE MP авторизация и синхронизация персонажей GTA5RP НЕ реализованы. Проверка UDP не означает вход в GTA5RP." size:12 strong:NO];
- note.textColor=UIColor.lightGrayColor;
- [stack addArrangedSubview:note];
+ [stack.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor constant:18],
+ [stack.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor constant:-18],
+ [stack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor constant:15],
+ [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-30],
+ [stack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-36]]];
+ UILabel *title=[self label:@"★ GTA5RP MOBILE" size:27];title.textColor=orange();
+ [stack addArrangedSubview:title];
+ UILabel *sub=[self label:@"Диагностика RAGE MP поверх GTA V. Не является входом в игровую сессию." size:13];sub.textColor=UIColor.lightGrayColor;
+ [stack addArrangedSubview:sub];
+ self.server=[self field:@"Название сервера" value:@"Eclipse"];[stack addArrangedSubview:self.server];
+ UIButton *refresh=[self button:@"ПОКАЗАТЬ РЕАЛЬНЫЙ ОНЛАЙН" click:@selector(refresh)];
+ [stack addArrangedSubview:refresh];[refresh.heightAnchor constraintEqualToConstant:50].active=YES;
+ self.info=[self label:@"ОНЛАЙН: ЕЩЁ НЕ ЗАПРОШЕН" size:19];[stack addArrangedSubview:self.info];
+ UILabel *div=[self label:@"ПРОВЕРКА ПОДКЛЮЧЕНИЯ" size:21];div.textColor=orange();[stack addArrangedSubview:div];
+ self.host=[self field:@"server.gta5rp.com:22005" value:@"eclipse.gta5rp.com:22005"];
+ [stack addArrangedSubview:self.host];
+ UIButton *ping=[self button:@"ПРОВЕРИТЬ UDP 22005" click:@selector(probe)];
+ [stack addArrangedSubview:ping];[ping.heightAnchor constraintEqualToConstant:50].active=YES;
+ self.networkInfo=[self label:@"Ожидается адрес сервера" size:14];[stack addArrangedSubview:self.networkInfo];
+ UILabel *notice=[self label:@"Сохранён оригинальный P2P-онлайн порта. RAGE MP протокол, авторизация и синхронизация игроков пока НЕ реализованы." size:13];
+ notice.textColor=UIColor.lightGrayColor;[stack addArrangedSubview:notice];
+ UIButton *back=[self button:@"ВЕРНУТЬСЯ В GTA V ▶" click:@selector(toggle)];
+ [stack addArrangedSubview:back];[back.heightAnchor constraintEqualToConstant:50].active=YES;
 }
--(BOOL)textFieldShouldReturn:(UITextField*)f{[f resignFirstResponder];return YES;}
--(void)toggle{
- BOOL show=self.menu.hidden;self.menu.hidden=!show;self.floating.hidden=show;
- self.overlay.menuOpen=show;[self.nameField resignFirstResponder];[self.hostField resignFirstResponder];
- if(show)[self fetchMaster];
+- (void)toggle {
+ BOOL open=self.menu.isHidden;self.menu.hidden=!open;self.launchButton.hidden=open;
+ self.overlay.expanded=open;[self.server resignFirstResponder];[self.host resignFirstResponder];
+ if(open)[self refresh];
 }
--(void)fetchMaster{
- [self.task cancel];self.online.text=@"ОНЛАЙН: ПРОВЕРКА";self.servers.text=@"Получение публичного каталога…";
- NSURLRequest*req=[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://cdn.rage.mp/master/"] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
- __weak typeof(self)weak=self;
- self.task=[[NSURLSession sharedSession]dataTaskWithRequest:req completionHandler:^(NSData*data,NSURLResponse*response,NSError*error){
- dispatch_async(dispatch_get_main_queue(),^{
- __strong typeof(weak)obj=weak;if(!obj)return;
- if(error){if(error.code==NSURLErrorCancelled)return;obj.online.text=@"ОНЛАЙН: НЕТ ДАННЫХ";obj.servers.text=error.localizedDescription;return;}
- if(![response isKindOfClass:NSHTTPURLResponse.class]||((NSHTTPURLResponse*)response).statusCode!=200||data.length>20000000){
- obj.online.text=@"ОНЛАЙН: НЕТ ДАННЫХ";obj.servers.text=@"Ошибка HTTP";return;}
- id parsed=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
- if(![parsed isKindOfClass:NSDictionary.class]){obj.online.text=@"ОНЛАЙН: НЕТ ДАННЫХ";obj.servers.text=@"Неизвестный формат";return;}
- NSString*name=[obj.nameField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
- if(!name.length)name=@"Eclipse";
- NSMutableArray*rows=[NSMutableArray new];NSInteger online=0,limit=0;
- for(id key in (NSDictionary*)parsed){
- id item=[(NSDictionary*)parsed objectForKey:key];if(![item isKindOfClass:NSDictionary.class])continue;
- NSString*title=item[@"name"];if(![title isKindOfClass:NSString.class])continue;
- NSString*flat=[[title lowercaseString]stringByReplacingOccurrencesOfString:@" " withString:@""];
- if(![flat containsString:@"gta5rp"]||[title rangeOfString:name options:NSCaseInsensitiveSearch].location==NSNotFound)continue;
- NSNumber*n=item[@"players"],*m=item[@"maxplayers"];
- if(![n isKindOfClass:NSNumber.class]||![m isKindOfClass:NSNumber.class]||n.integerValue<0||m.integerValue<=0||n.integerValue>m.integerValue)continue;
- online+=n.integerValue;limit+=m.integerValue;
- [rows addObject:[NSString stringWithFormat:@"%@ : %ld/%ld\n%@",title,(long)n.integerValue,(long)m.integerValue,key]];
- }
- if(rows.count){obj.online.text=[NSString stringWithFormat:@"ОНЛАЙН: %ld / %ld",(long)online,(long)limit];obj.servers.text=[rows componentsJoinedByString:@"\n\n"];}
- else{obj.online.text=@"ОНЛАЙН: НЕТ ДАННЫХ";obj.servers.text=@"Совпадений нет. Это не значит, что сервер выключен.";}
- });
- }];[self.task resume];
+- (void)refresh {
+ [self.task cancel];self.info.text=@"Получаем онлайн…";
+ NSString *which=[self.server.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
+ if(!which.length)which=@"eclipse";
+ NSURLRequest *req=[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://cdn.rage.mp/master/"]
+ cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
+ __weak typeof(self) weakSelf=self;
+ self.task=[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *err) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+   __strong typeof(weakSelf) owner=weakSelf;if(!owner)return;
+   if(err){if(err.code!=NSURLErrorCancelled)owner.info.text=@"Каталог недоступен";return;}
+   if(![response isKindOfClass:NSHTTPURLResponse.class] || ((NSHTTPURLResponse*)response).statusCode!=200 || data.length>20000000){owner.info.text=@"Сервер статистики не ответил";return;}
+   id root=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+   if(![root isKindOfClass:NSDictionary.class]){owner.info.text=@"Неизвестный формат статистики";return;}
+   NSInteger count=0,limit=0,hits=0;
+   for(id key in (NSDictionary*)root){
+    id entry=((NSDictionary*)root)[key];if(![entry isKindOfClass:NSDictionary.class])continue;
+    NSString *title=entry[@"name"];if(![title isKindOfClass:NSString.class])continue;
+    NSString *t=[[title lowercaseString] stringByReplacingOccurrencesOfString:@" " withString:@""];
+    if(![t containsString:@"gta5rp"]||![t containsString:which])continue;
+    NSNumber *n=entry[@"players"],*max=entry[@"maxplayers"];
+    if(![n isKindOfClass:NSNumber.class]||![max isKindOfClass:NSNumber.class])continue;
+    if(n.integerValue<0||max.integerValue<=0||n.integerValue>max.integerValue)continue;
+    count+=n.integerValue;limit+=max.integerValue;hits++;
+   }
+   owner.info.text=hits?[NSString stringWithFormat:@"ОНЛАЙН: %ld / %ld",(long)count,(long)limit]:
+       @"Нет сведений в RAGE MP masterlist";
+  });
+ }];
+ [self.task resume];
 }
--(void)probe{
- [self.hostField resignFirstResponder];
- NSString*input=[self.hostField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
- NSArray<NSString*>*parts=[input componentsSeparatedByString:@":"];
- if(parts.count<1||parts.count>2||!parts.firstObject.length){self.status.text=@"UDP: укажи домен:порт";return;}
- NSString*host=parts.firstObject;NSInteger port=parts.count==2?parts.lastObject.integerValue:22005;
- if(port<1||port>65535){self.status.text=@"UDP: неверный порт";return;}
- self.status.text=@"UDP: отправка RakNet ping…";
- __weak typeof(self)weak=self;
- dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
- struct addrinfo hints={0},*result=NULL;hints.ai_family=AF_UNSPEC;hints.ai_socktype=SOCK_DGRAM;
- NSString*pstr=[NSString stringWithFormat:@"%ld",(long)port];int err=getaddrinfo(host.UTF8String,pstr.UTF8String,&hints,&result);
- NSString*message=nil;BOOL pong=NO;
- if(err)message=[NSString stringWithFormat:@"DNS: %s",gai_strerror(err)];
- else{
- static const unsigned char magic[]={0,255,255,0,254,254,254,254,253,253,253,253,18,52,86,120};
- unsigned char packet[33]={0};packet[0]=1;
- uint64_t t=(uint64_t)(NSDate.date.timeIntervalSince1970*1000);
- for(int i=0;i<8;i++)packet[1+i]=(t>>(56-8*i))&255;
- memcpy(packet+9,magic,16);
- for(struct addrinfo*a=result;a;a=a->ai_next){
- int fd=socket(a->ai_family,SOCK_DGRAM,IPPROTO_UDP);if(fd<0)continue;
- struct timeval tv={2,0};setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
- ssize_t sent=sendto(fd,packet,33,0,a->ai_addr,a->ai_addrlen);
- unsigned char recv[4096];ssize_t count=sent==33?recvfrom(fd,recv,sizeof(recv),0,NULL,NULL):-1;close(fd);
- if(count>=35&&recv[0]==0x1c&&memcmp(recv+17,magic,16)==0){pong=YES;break;}
- }
- freeaddrinfo(result);
- message=pong?@"Получен ответ RakNet Pong. Сервер отвечает, игровая сессия НЕ создана.":@"Нет ответа RakNet Pong. Это не доказывает недоступность сервера.";
- }
- dispatch_async(dispatch_get_main_queue(),^{__strong typeof(weak)obj=weak;if(obj)obj.status.text=message;});
+- (void)probe {
+ NSString *target=[self.host.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+ NSArray *parts=[target componentsSeparatedByString:@":"];
+ if(parts.count>2||!parts.firstObject.length){self.networkInfo.text=@"Укажи домен:порт";return;}
+ NSString *host=parts.firstObject;NSInteger port=parts.count==2?[parts.lastObject integerValue]:22005;
+ if(port<=0||port>65535){self.networkInfo.text=@"Неверный UDP-порт";return;}
+ self.networkInfo.text=@"Проверяем RakNet UDP…";
+ __weak typeof(self) weakSelf=self;
+ dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
+  struct addrinfo hints={0},*list=NULL;hints.ai_family=AF_UNSPEC;hints.ai_socktype=SOCK_DGRAM;
+  NSString *portText=[NSString stringWithFormat:@"%ld",(long)port];
+  int rc=getaddrinfo(host.UTF8String,portText.UTF8String,&hints,&list);
+  BOOL received=NO;
+  if(rc==0){
+   static const unsigned char magic[]={0,255,255,0,254,254,254,254,253,253,253,253,18,52,86,120};
+   unsigned char ping[33]={0};ping[0]=1;
+   uint64_t tick=(uint64_t)(NSDate.date.timeIntervalSince1970*1000);
+   for(int i=0;i<8;i++)ping[1+i]=(tick>>(56-8*i))&255;
+   memcpy(ping+9,magic,sizeof(magic));
+   uint64_t guid=arc4random();
+   for(int i=0;i<8;i++)ping[25+i]=(guid>>(56-8*i))&255;
+   for(struct addrinfo *entry=list;entry;entry=entry->ai_next){
+    int s=socket(entry->ai_family,SOCK_DGRAM,IPPROTO_UDP);if(s<0)continue;
+    struct timeval to={2,0};setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,&to,sizeof(to));
+    ssize_t sent=sendto(s,ping,sizeof(ping),0,entry->ai_addr,entry->ai_addrlen);
+    unsigned char pong[2048];ssize_t got=sent==sizeof(ping)?recvfrom(s,pong,sizeof(pong),0,NULL,NULL):-1;
+    close(s);
+    if(got>=35&&pong[0]==0x1c&&memcmp(pong+17,magic,16)==0){received=YES;break;}
+   }
+   freeaddrinfo(list);
+  }
+  dispatch_async(dispatch_get_main_queue(), ^{
+   __strong typeof(weakSelf) owner=weakSelf;if(!owner)return;
+   owner.networkInfo.text=received?@"UDP сервер ответил. Вход в GTA5RP НЕ выполнен.":
+     (rc==0?@"Не получен RakNet Pong. Это не означает, что сервер выключен.":@"DNS-адрес не найден.");
+  });
  });
 }
 @end
-@interface RPBoot:NSObject @end
+
+@interface RPBoot : NSObject @end
 @implementation RPBoot
-static RPWindow *gWindow=nil;
-+(void)load{
- dispatch_async(dispatch_get_main_queue(),^{
- [[NSNotificationCenter defaultCenter]addObserver:self selector:@selector(wake:) name:UIApplicationDidBecomeActiveNotification object:nil];
- [[NSNotificationCenter defaultCenter]addObserver:self selector:@selector(wake:) name:UISceneDidActivateNotification object:nil];
- [self install:0];});
+static RPHUDWindow *activeWindow=nil;
++ (void)load {
+ dispatch_async(dispatch_get_main_queue(), ^{
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(activated:) name:UIApplicationDidBecomeActiveNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(activated:) name:UISceneDidActivateNotification object:nil];
+  [self install:0];
+ });
 }
-+(void)wake:(NSNotification*)note{[self install:0];}
-+(void)install:(NSUInteger)attempt{
- if(gWindow||attempt>40)return;
- UIWindowScene*scene=nil;
- for(UIScene*s in UIApplication.sharedApplication.connectedScenes)
- if([s isKindOfClass:UIWindowScene.class]&&s.activationState==UISceneActivationStateForegroundActive){scene=(UIWindowScene*)s;break;}
- if(!scene&&!UIApplication.sharedApplication.windows.count){
- dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{[self install:attempt+1];});return;}
- RPWindow*win=scene?[[RPWindow alloc]initWithWindowScene:scene]:[[RPWindow alloc]initWithFrame:UIScreen.mainScreen.bounds];
- win.backgroundColor=UIColor.clearColor;win.windowLevel=UIWindowLevelAlert+3;
- RPController*control=[RPController new];win.rootViewController=control;control.overlay=win;
- win.hidden=NO;[win layoutIfNeeded];win.launcherButton=control.floating;gWindow=win;
++ (void)activated:(NSNotification *)note{[self install:0];}
++ (void)install:(NSInteger)attempt {
+ if(activeWindow||attempt>60)return;
+ UIWindowScene *scene=nil;
+ for(UIScene *candidate in UIApplication.sharedApplication.connectedScenes)
+  if([candidate isKindOfClass:UIWindowScene.class]&&candidate.activationState==UISceneActivationStateForegroundActive){scene=(UIWindowScene*)candidate;break;}
+ if(!scene&&UIApplication.sharedApplication.windows.count==0){
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1*NSEC_PER_SEC),dispatch_get_main_queue(),^{[self install:attempt+1];});return;
+ }
+ RPHUDWindow *window=scene?[[RPHUDWindow alloc]initWithWindowScene:scene]:[[RPHUDWindow alloc]initWithFrame:UIScreen.mainScreen.bounds];
+ window.frame=scene?scene.coordinateSpace.bounds:UIScreen.mainScreen.bounds;
+ window.backgroundColor=UIColor.clearColor;window.windowLevel=UIWindowLevelAlert+4;
+ RPHUDController *controller=[RPHUDController new];window.rootViewController=controller;controller.overlay=window;
+ window.hidden=NO;[window layoutIfNeeded];window.launcher=controller.launchButton;activeWindow=window;
 }
 @end

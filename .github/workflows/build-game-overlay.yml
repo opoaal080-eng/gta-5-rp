@@ -1,4 +1,4 @@
-name: Build GTA5RP In-Game Overlay
+name: Compile GTA5RP in-game menu dylib
 on:
   workflow_dispatch:
   push:
@@ -8,25 +8,26 @@ on:
 permissions:
   contents: read
 jobs:
-  overlay:
+  build:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Compile overlay arm64 iPhoneOS
+      - name: Compile iPhone ARM64 library
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifact
-          xcrun --sdk iphoneos clang \
-            -arch arm64 -miphoneos-version-min=16.3 \
+          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=16.3 \
             -fobjc-arc -fmodules -O2 -dynamiclib \
             -install_name '@executable_path/Frameworks/libGTA5RPOverlay.dylib' \
             -framework Foundation -framework UIKit \
             -o artifact/libGTA5RPOverlay.dylib ios-game-overlay/RPOverlay.m
-          xcrun --sdk iphoneos lipo -info artifact/libGTA5RPOverlay.dylib
-      - uses: actions/upload-artifact@v4
+          file artifact/libGTA5RPOverlay.dylib
+      - name: Upload compiled dylib
+        uses: actions/upload-artifact@v4
         with:
-          name: GTA5RP-Game-Overlay-arm64
+          name: GTA5RP-Overlay-ARM64
           path: artifact/libGTA5RPOverlay.dylib
-          retention-days: 14
           if-no-files-found: error
+          retention-days: 14
