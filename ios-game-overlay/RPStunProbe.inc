@@ -57,5 +57,4 @@ static void RPStunProbe(void (^message)(NSString *)) {
   message(mapped?[NSString stringWithFormat:@"Внешний адрес: %@",mapped]:@"Внешний IPv4 не указан");
   message(@"UDP-обмен с STUN работает, но это НЕ вход в GTA5RP");
  });
-});
 }
