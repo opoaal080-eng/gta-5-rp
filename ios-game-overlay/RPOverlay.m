@@ -7,6 +7,7 @@
 #import <arpa/inet.h>
 #import <errno.h>
 #import <string.h>
+#include "RPStunProbe.inc"
 static UIColor *orange(void){return [UIColor colorWithRed:1 green:.40 blue:.10 alpha:1];}
 static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.082 alpha:1];}
 @interface RPHUDWindow : UIWindow
@@ -28,6 +29,8 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
 @property(nonatomic,strong) UIView *menu;
 @property(nonatomic,strong) UILabel *info;
 @property(nonatomic,strong) UILabel *networkInfo;
+@property(nonatomic,strong) UILabel *stunInfo;
+@property(nonatomic) BOOL stunBusy;
 @property(nonatomic,strong) UITextField *server;
 @property(nonatomic,strong) UITextField *host;
 @property(nonatomic,strong) NSURLSessionDataTask *task;
@@ -113,6 +116,13 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  UILabel *div=[self label:@"ПРОВЕРКА ПОДКЛЮЧЕНИЯ" size:21];div.textColor=orange();[stack addArrangedSubview:div];
  self.host=[self field:@"server.gta5rp.com:22005" value:@"eclipse.gta5rp.com:22005"];
  [stack addArrangedSubview:self.host];
+
+ UILabel *stunHeading=[self label:@"ПРОВЕРКА UDP ЧЕРЕЗ GOOGLE STUN" size:20];
+ stunHeading.textColor=orange();[stack addArrangedSubview:stunHeading];
+ UIButton *stun=[self button:@"ПРОВЕРИТЬ STUN 19302" click:@selector(stunProbe)];
+ [stack addArrangedSubview:stun];[stun.heightAnchor constraintEqualToConstant:50].active=YES;
+ self.stunInfo=[self label:@"Тест STUN ещё не запущен" size:14];
+ [stack addArrangedSubview:self.stunInfo];
  UIButton *ping=[self button:@"ПРОВЕРИТЬ UDP 22005" click:@selector(probe)];
  [stack addArrangedSubview:ping];[ping.heightAnchor constraintEqualToConstant:50].active=YES;
  self.networkInfo=[self label:@"Ожидается адрес сервера" size:14];[stack addArrangedSubview:self.networkInfo];
@@ -170,6 +180,28 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
   });
  }];
  [self.task resume];
+}
+- (void)stunProbe {
+ if(self.stunBusy)return;
+ self.stunBusy=YES;
+ self.stunInfo.text=@"Начало STUN-теста…";
+ __weak typeof(self) weakSelf=self;
+ RPStunProbe(^(NSString *message) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+   __strong typeof(weakSelf) controller=weakSelf;
+   if(!controller)return;
+   NSString *previous=controller.stunInfo.text ?: @"";
+   controller.stunInfo.text=previous.length?
+      [previous stringByAppendingFormat:@"\n%@",message]:message;
+   if([message containsString:@"НЕ вход в GTA5RP"]||
+      [message containsString:@"тайм-аут"]||
+      [message containsString:@"не соответствует"]||
+      [message containsString:@"Некорректная длина"]||
+      [message containsString:@"нет публичного"]||
+      [message containsString:@"невозможно создать"]||
+      [message containsString:@"STUN отправка"])controller.stunBusy=NO;
+  });
+ });
 }
 - (void)appendDiagnostic:(NSString *)message {
  if(!message.length)return;
