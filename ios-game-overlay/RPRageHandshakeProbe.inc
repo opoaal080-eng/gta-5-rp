@@ -68,7 +68,7 @@ static void RPRaknetOpenProbe(NSString *host, uint16_t port,
     log([NSString stringWithFormat:@"Ответ UDP: ID=0x%02X, %zu байт, %.0f мс",
            kind,count,ms]);
     if(kind==0x06){
-     if(count<26 || memcmp(response+1,magic,16)!=0){
+     if(count<26 || memcmp(response+1,((const uint8_t *)immutable.bytes)+1,16)!=0){
       log(@"Ответ 0x06: неверный magic / слишком короткий пакет");
      }else{
       uint64_t guid=0;
@@ -80,7 +80,7 @@ static void RPRaknetOpenProbe(NSString *host, uint16_t port,
       log(@"Это лишь начальный ответ, ещё НЕ соединение GTA5RP.");
      }
     }else if(kind==0x19){
-     if(count>=18 && memcmp(response+2,magic,16)==0)
+     if(count>=18 && memcmp(response+2,((const uint8_t *)immutable.bytes)+1,16)==0)
       log([NSString stringWithFormat:@"Версия RakNet несовместима: сервер сообщает %u",
                        (unsigned)response[1]]);
      else log(@"Пакет 0x19, но структура не подтверждена");
