@@ -1,0 +1,19 @@
+name: GTA5RPLauncher
+options:
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  GTA5RPLauncher:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fun.nightwell.gta5rplauncher
+        PRODUCT_NAME: GTA5RP Mobile
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Manual
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
