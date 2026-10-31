@@ -204,22 +204,124 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
   hints.ai_protocol=IPPROTO_UDP;
   int dns=getaddrinfo(host.UTF8String,portText.UTF8String,&hints,&addresses);
   if(dns!=0){
-   log([NSString stringWithFormat:@"✕ DNS: %s",gai_strerror(dns)]);
+   log([NSString stringWithFormat:@"✕ Системный DNS: %s",gai_strerror(dns)]);
    dispatch_async(dispatch_get_main_queue(),^{weakSelf.probing=NO;});
    return;
   }
   NSMutableArray<NSString *> *ips=[NSMutableArray array];
+  BOOL allSynthetic=YES;
+  BOOL hasCandidate=NO;
   for(struct addrinfo *p=addresses;p;p=p->ai_next){
    char ip[NI_MAXHOST]={0};
-   if(getnameinfo(p->ai_addr,(socklen_t)p->ai_addrlen,ip,sizeof(ip),NULL,0,NI_NUMERICHOST)==0)
-    [ips addObject:[NSString stringWithUTF8String:ip]];
+   if(getnameinfo(p->ai_addr,(socklen_t)p->ai_addrlen,ip,sizeof(ip),NULL,0,NI_NUMERICHOST)!=0)continue;
+   NSString *value=[NSString stringWithUTF8String:ip];
+   [ips addObject:value];
+   if(p->ai_family==AF_INET){
+    uint8_t a[4];
+    memcpy(a,&((struct sockaddr_in *)p->ai_addr)->sin_addr,4);
+    BOOL synthetic=(a[0]>=240 || (a[0]==198&&(a[1]==18||a[1]==19)));
+    if(!synthetic){allSynthetic=NO;hasCandidate=YES;}
+   } else if(p->ai_family==AF_INET6){
+    allSynthetic=NO;hasCandidate=YES;
+   }
   }
-  log([NSString stringWithFormat:@"✓ DNS: %@",ips.count?[ips componentsJoinedByString:@", "]:@"пустой ответ"]);
+  log([NSString stringWithFormat:@"✓ DNS системы: %@",ips.count?[ips componentsJoinedByString:@", "]:@"пустой ответ"]);
+  if(ips.count>0&&allSynthetic&&!hasCandidate){
+   log(@"! Адрес зарезервирован (Fake-IP/VPN DNS). Не отправляем UDP в 240/4 или 198.18/15.");
+   log(@"2. Запрашиваем публичный IPv4 через HTTPS DNS…");
+   // Both providers use an ordinary public JSON DNS response. No fabricated result and no
+   // undocumented GTA5RP handshake. The user explicitly pressed the diagnostic button.
+   NSArray<NSString *> *providers=@[@"dns.google", @"cloudflare-dns.com"];
+   NSString *resolved=nil;
+   for(NSString *provider in providers){
+    NSURLComponents *component=[NSURLComponents new];
+    component.scheme=@"https";component.host=provider;
+    component.path=[provider isEqualToString:@"dns.google"]?@"/resolve":@"/dns-query";
+    component.queryItems=@[
+     [NSURLQueryItem queryItemWithName:@"name" value:host],
+     [NSURLQueryItem queryItemWithName:@"type" value:@"A"]
+    ];
+    if(!component.URL)continue;
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:component.URL];
+    request.timeoutInterval=6;
+    [request setValue:@"application/dns-json" forHTTPHeaderField:@"Accept"];
+    NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
+    config.timeoutIntervalForRequest=6;
+    config.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
+    NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+    dispatch_semaphore_t done=dispatch_semaphore_create(0);
+    __block NSData *responseData=nil;
+    __block NSInteger httpCode=0;
+    NSURLSessionDataTask *task=[session dataTaskWithRequest:request
+     completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+      if(!error && [(id)response isKindOfClass:NSHTTPURLResponse.class]){
+       responseData=data;
+       httpCode=((NSHTTPURLResponse *)response).statusCode;
+      }
+      dispatch_semaphore_signal(done);
+     }];
+    [task resume];
+    long wait=dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,7*NSEC_PER_SEC));
+    if(wait!=0)[task cancel];
+    [session invalidateAndCancel];
+    if(wait!=0||httpCode!=200||responseData.length>100000)continue;
+    NSDictionary *response=[NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
+    if(![response isKindOfClass:NSDictionary.class]||[response[@"Status"] integerValue]!=0)continue;
+    for(id item in response[@"Answer"]){
+     if(![item isKindOfClass:NSDictionary.class]||[item[@"type"] integerValue]!=1)continue;
+     NSString *address=item[@"data"];
+     if(![address isKindOfClass:NSString.class])continue;
+     struct in_addr parsed;
+     if(inet_pton(AF_INET,address.UTF8String,&parsed)!=1)continue;
+     const uint8_t *octets=(const uint8_t *)&parsed;
+     BOOL special=octets[0]==0||octets[0]==10||octets[0]==127||
+      octets[0]>=224 || (octets[0]==169&&octets[1]==254) ||
+      (octets[0]==172&&octets[1]>=16&&octets[1]<=31) ||
+      (octets[0]==192&&octets[1]==168) ||
+      (octets[0]==198&&(octets[1]==18||octets[1]==19));
+     if(special)continue;
+     resolved=address;
+     break;
+    }
+    if(resolved){
+     log([NSString stringWithFormat:@"✓ DoH %@: %@",provider,resolved]);
+     break;
+    }
+    log([NSString stringWithFormat:@"! DoH %@ не вернул проверяемый публичный IPv4",provider]);
+   }
+   freeaddrinfo(addresses);
+   addresses=NULL;
+   if(!resolved){
+    log(@"Итог: только Fake-IP; DoH не дал реальный адрес. Проверь режим DNS/VPN, исключи gta5rp.com из Fake-IP.");
+    dispatch_async(dispatch_get_main_queue(),^{weakSelf.probing=NO;});
+    return;
+   }
+   hints.ai_family=AF_INET;
+   hints.ai_flags=AI_NUMERICHOST;
+   dns=getaddrinfo(resolved.UTF8String,portText.UTF8String,&hints,&addresses);
+   if(dns!=0){
+    log([NSString stringWithFormat:@"✕ Сетевой адрес DoH: %s",gai_strerror(dns)]);
+    dispatch_async(dispatch_get_main_queue(),^{weakSelf.probing=NO;});
+    return;
+   }
+   log(@"3. UDP-проба отправляется на публичный IP. VPN всё ещё может блокировать UDP.");
+  } else if(!hasCandidate){
+   log(@"Итог: DNS не дал подходящих адресов.");
+   if(addresses)freeaddrinfo(addresses);
+   dispatch_async(dispatch_get_main_queue(),^{weakSelf.probing=NO;});
+   return;
+  } else {
+   log(@"2. Системный DNS дал обычный IP. Продолжаем UDP-проверку.");
+  }
   static const unsigned char magic[16]={0,255,255,0,254,254,254,254,253,253,253,253,18,52,86,120};
   BOOL sentAny=NO,replyAny=NO,valid=NO;
   NSUInteger attempted=0;
   for(struct addrinfo *p=addresses;p&&attempted<4;p=p->ai_next){
    if(p->ai_family!=AF_INET&&p->ai_family!=AF_INET6)continue;
+   if(p->ai_family==AF_INET){
+    const uint8_t *o=(const uint8_t *)&((struct sockaddr_in *)p->ai_addr)->sin_addr;
+    if(o[0]>=240||(o[0]==198&&(o[1]==18||o[1]==19)))continue;
+   }
    attempted++;
    int fd=socket(p->ai_family,SOCK_DGRAM,IPPROTO_UDP);
    if(fd<0){
