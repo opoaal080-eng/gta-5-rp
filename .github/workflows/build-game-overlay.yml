@@ -21,7 +21,7 @@ jobs:
           xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=16.3 \
             -fobjc-arc -fmodules -O2 -dynamiclib \
             -install_name '@executable_path/Frameworks/libGTA5RPOverlay.dylib' \
-            -framework Foundation -framework UIKit \
+            -framework Foundation -framework UIKit -framework Network \
             -o artifact/libGTA5RPOverlay.dylib ios-game-overlay/RPOverlay.m
           file artifact/libGTA5RPOverlay.dylib
       - name: Upload compiled dylib
