@@ -113,7 +113,7 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-22],
  [stack.widthAnchor constraintLessThanOrEqualToConstant:590],
  [stack.widthAnchor constraintLessThanOrEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-36]]];
- UILabel *title=[self label:@"★ GTA5RP MOBILE" size:27];title.textColor=orange();
+ UILabel *title=[self label:@"★ GTA5RP MOBILE v1.0" size:27];title.textColor=orange();
  [stack addArrangedSubview:title];
  UILabel *sub=[self label:@"Диагностика RAGE MP поверх GTA V. Не является входом в игровую сессию." size:13];sub.textColor=UIColor.lightGrayColor;
  [stack addArrangedSubview:sub];
@@ -151,8 +151,15 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  [resourceProbe.heightAnchor constraintEqualToConstant:50].active=YES;
  self.resourcesInfo=[self label:@"Порт+1: HTTP-заголовки не проверены" size:14];
  [stack addArrangedSubview:self.resourcesInfo];
- UILabel *notice=[self label:@"Диагностика: RakNet 0x05 с несколькими MTU и HTTP HEAD. Игровая авторизация и синхронизация GTA5RP не реализованы. P2P порт сохранён." size:13];
+ UILabel *notice=[self label:@"Проверки показывают только доступность сети. Официальный игровой handshake, авторизация и синхронизация GTA5RP пока НЕ реализованы. P2P-порт сохранён." size:13];
  notice.textColor=UIColor.lightGrayColor;[stack addArrangedSubview:notice];
+ UILabel *traceHeading=[self label:@"ДИАГНОСТИЧЕСКИЙ ОТЧЁТ" size:20];
+ traceHeading.textColor=orange();[stack addArrangedSubview:traceHeading];
+ UILabel *traceHint=[self label:@"Сохраняет только текст уже выполненных проверок. Отчёт может содержать внешний IP. Отправка происходит только по твоему выбору." size:12];
+ traceHint.textColor=UIColor.lightGrayColor;[stack addArrangedSubview:traceHint];
+ UIButton *exportLogs=[self button:@"ПОДЕЛИТЬСЯ ОТЧЁТОМ" click:@selector(exportDiagnostics)];
+ [stack addArrangedSubview:exportLogs];
+ [exportLogs.heightAnchor constraintEqualToConstant:50].active=YES;
  UIButton *back=[self button:@"ВЕРНУТЬСЯ В GTA V ▶" click:@selector(toggle)];
  [stack addArrangedSubview:back];[back.heightAnchor constraintEqualToConstant:50].active=YES;
 }
@@ -169,6 +176,36 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
   self.buttonCenterY.active=NO;
   self.buttonBottom.active=YES;
  }
+}
+- (void)exportDiagnostics {
+ NSDateFormatter *df=[NSDateFormatter new];
+ df.dateFormat=@"yyyy-MM-dd HH:mm:ss Z";
+ NSString *date=[df stringFromDate:NSDate.date];
+ NSArray<NSArray<NSString *> *> *parts=@[
+  @[@"ONLINE", self.info.text ?: @"not checked"],
+  @[@"UDP / RAKNET 0x01",self.networkInfo.text ?: @"not checked"],
+  @[@"STUN / BSD",self.stunInfo.text ?: @"not checked"],
+  @[@"STUN / NETWORK.FRAMEWORK",self.nativeStunInfo.text ?: @"not checked"],
+  @[@"RAKNET 0x05",self.rageInfo.text ?: @"not checked"],
+  @[@"HTTP RESOURCE HEAD",self.resourcesInfo.text ?: @"not checked"]
+ ];
+ NSMutableString *report=[NSMutableString stringWithFormat:
+   @"GTA5RP Online Lab v1.0 (experimental, no game connection)\nTimestamp: %@\nSelected server: %@\nAddress: %@\nDevice: %@ / iOS %@\n\n",
+   date,
+   self.server.text ?: @"",
+   self.host.text ?: @"",
+   UIDevice.currentDevice.model,
+   UIDevice.currentDevice.systemVersion];
+ for(NSArray<NSString *> *part in parts){
+  [report appendFormat:@"[%@]\n%@\n\n",part[0],part[1]];
+ }
+ [report appendString:@"This report does not contain an authorized RAGE MP gameplay session.\n"];
+ UIActivityViewController *share=[[UIActivityViewController alloc]initWithActivityItems:@[report]
+     applicationActivities:nil];
+ UIPopoverPresentationController *popup=share.popoverPresentationController;
+ if(popup){popup.sourceView=self.menu;popup.sourceRect=CGRectMake(CGRectGetMidX(self.menu.bounds),
+          CGRectGetMidY(self.menu.bounds),1,1);popup.permittedArrowDirections=0;}
+ [self presentViewController:share animated:YES completion:nil];
 }
 - (void)toggle {
  BOOL open=self.menu.isHidden;self.menu.hidden=!open;self.launchButton.hidden=open;
