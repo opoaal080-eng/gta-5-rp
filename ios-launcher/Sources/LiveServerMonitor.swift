@@ -178,7 +178,6 @@ struct PlayerWorldView: View {
         camera.position = SCNVector3(0, 65, 85)
         camera.look(at: SCNVector3(0, 0, 0))
         scene.rootNode.addChildNode(camera)
-        scene.pointOfView = camera
 
         guard let first = allPlayers.first else { return scene }
         for player in allPlayers.prefix(100) {
