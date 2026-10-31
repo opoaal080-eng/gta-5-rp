@@ -149,7 +149,7 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
 - (void)probe {
  NSString *target=[self.host.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
  NSArray *parts=[target componentsSeparatedByString:@":"];
- if(parts.count>2||!parts.firstObject.length){self.networkInfo.text=@"Укажи домен:порт";return;}
+ if(parts.count>2||![(NSString *)parts.firstObject length]){self.networkInfo.text=@"Укажи домен:порт";return;}
  NSString *host=parts.firstObject;NSInteger port=parts.count==2?[parts.lastObject integerValue]:22005;
  if(port<=0||port>65535){self.networkInfo.text=@"Неверный UDP-порт";return;}
  self.networkInfo.text=@"Проверяем RakNet UDP…";
