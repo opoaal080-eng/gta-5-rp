@@ -8,6 +8,7 @@
 #import <errno.h>
 #import <string.h>
 #include "RPStunProbe.inc"
+#include "RPStunNative.inc"
 static UIColor *orange(void){return [UIColor colorWithRed:1 green:.40 blue:.10 alpha:1];}
 static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.082 alpha:1];}
 @interface RPHUDWindow : UIWindow
@@ -30,7 +31,9 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
 @property(nonatomic,strong) UILabel *info;
 @property(nonatomic,strong) UILabel *networkInfo;
 @property(nonatomic,strong) UILabel *stunInfo;
+@property(nonatomic,strong) UILabel *nativeStunInfo;
 @property(nonatomic) BOOL stunBusy;
+@property(nonatomic) BOOL nativeStunBusy;
 @property(nonatomic,strong) UITextField *server;
 @property(nonatomic,strong) UITextField *host;
 @property(nonatomic,strong) NSURLSessionDataTask *task;
@@ -123,6 +126,11 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  [stack addArrangedSubview:stun];[stun.heightAnchor constraintEqualToConstant:50].active=YES;
  self.stunInfo=[self label:@"Тест STUN ещё не запущен" size:14];
  [stack addArrangedSubview:self.stunInfo];
+ UIButton *nativeButton=[self button:@"ПРОВЕРИТЬ NATIVE UDP (iOS)" click:@selector(nativeStunProbe)];
+ [stack addArrangedSubview:nativeButton];
+ [nativeButton.heightAnchor constraintEqualToConstant:50].active=YES;
+ self.nativeStunInfo=[self label:@"Альтернативная проверка через Apple Network.framework" size:14];
+ [stack addArrangedSubview:self.nativeStunInfo];
  UIButton *ping=[self button:@"ПРОВЕРИТЬ UDP 22005" click:@selector(probe)];
  [stack addArrangedSubview:ping];[ping.heightAnchor constraintEqualToConstant:50].active=YES;
  self.networkInfo=[self label:@"Ожидается адрес сервера" size:14];[stack addArrangedSubview:self.networkInfo];
@@ -180,6 +188,33 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
   });
  }];
  [self.task resume];
+}
+- (void)nativeStunLog:(NSString *)message {
+ NSString *old=self.nativeStunInfo.text ?: @"";
+ self.nativeStunInfo.text=old.length?[old stringByAppendingFormat:@"\n%@",message]:message;
+}
+- (void)nativeStunProbe {
+ if(self.nativeStunBusy)return;
+ self.nativeStunBusy=YES;
+ self.nativeStunInfo.text=@"Проверка №1: Google STUN 19302";
+ __weak typeof(self) weakSelf=self;
+ void (^log)(NSString *)=^(NSString *message) {
+  dispatch_async(dispatch_get_main_queue(),^{
+   __strong typeof(weakSelf) owner=weakSelf;
+   if(owner)[owner nativeStunLog:message];
+  });
+ };
+ RPStunNative("stun.l.google.com","19302",log,^(BOOL success){
+  if(success){
+   dispatch_async(dispatch_get_main_queue(),^{weakSelf.nativeStunBusy=NO;});
+  }else{
+   log(@"Google STUN не ответил. Проверка №2: Cloudflare STUN 3478.");
+   RPStunNative("stun.cloudflare.com","3478",log,^(BOOL otherSuccess){
+    if(!otherSuccess)log(@"Оба STUN-сервера не ответили через Apple Network.framework.");
+    dispatch_async(dispatch_get_main_queue(),^{weakSelf.nativeStunBusy=NO;});
+   });
+  }
+ });
 }
 - (void)stunProbe {
  if(self.stunBusy)return;
