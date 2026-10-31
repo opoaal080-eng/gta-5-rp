@@ -9,6 +9,7 @@
 #import <string.h>
 #include "RPStunProbe.inc"
 #include "RPStunNative.inc"
+#include "RPRageHandshakeProbe.inc"
 static UIColor *orange(void){return [UIColor colorWithRed:1 green:.40 blue:.10 alpha:1];}
 static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.082 alpha:1];}
 @interface RPHUDWindow : UIWindow
@@ -32,8 +33,12 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
 @property(nonatomic,strong) UILabel *networkInfo;
 @property(nonatomic,strong) UILabel *stunInfo;
 @property(nonatomic,strong) UILabel *nativeStunInfo;
+@property(nonatomic,strong) UILabel *rageInfo;
+@property(nonatomic,strong) UILabel *resourcesInfo;
 @property(nonatomic) BOOL stunBusy;
 @property(nonatomic) BOOL nativeStunBusy;
+@property(nonatomic) BOOL rageBusy;
+@property(nonatomic) BOOL resourcesBusy;
 @property(nonatomic,strong) UITextField *server;
 @property(nonatomic,strong) UITextField *host;
 @property(nonatomic,strong) NSURLSessionDataTask *task;
@@ -134,7 +139,19 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  UIButton *ping=[self button:@"ПРОВЕРИТЬ UDP 22005" click:@selector(probe)];
  [stack addArrangedSubview:ping];[ping.heightAnchor constraintEqualToConstant:50].active=YES;
  self.networkInfo=[self label:@"Ожидается адрес сервера" size:14];[stack addArrangedSubview:self.networkInfo];
- UILabel *notice=[self label:@"Сохранён оригинальный P2P-онлайн порта. RAGE MP протокол, авторизация и синхронизация игроков пока НЕ реализованы." size:13];
+ UILabel *stage=[self label:@"НАЧАЛЬНЫЙ ОБМЕН RAKNET" size:20];
+ stage.textColor=orange();[stack addArrangedSubview:stage];
+ UIButton *startProbe=[self button:@"ПРОВЕРИТЬ ПЕРВЫЙ ЭТАП (0x05)" click:@selector(rageProbe)];
+ [stack addArrangedSubview:startProbe];
+ [startProbe.heightAnchor constraintEqualToConstant:50].active=YES;
+ self.rageInfo=[self label:@"Этап 0/3: ещё не проверен" size:14];
+ [stack addArrangedSubview:self.rageInfo];
+ UIButton *resourceProbe=[self button:@"ПРОВЕРИТЬ TCP ПОРТ РЕСУРСОВ" click:@selector(resourcesProbe)];
+ [stack addArrangedSubview:resourceProbe];
+ [resourceProbe.heightAnchor constraintEqualToConstant:50].active=YES;
+ self.resourcesInfo=[self label:@"Порт+1: не проверен (TCP, без скачивания)" size:14];
+ [stack addArrangedSubview:self.resourcesInfo];
+ UILabel *notice=[self label:@"Этап 1: стандартная проверка RakNet. Этапы 2–3: игровая авторизация и синхронизация GTA5RP не реализованы. P2P порт сохранён." size:13];
  notice.textColor=UIColor.lightGrayColor;[stack addArrangedSubview:notice];
  UIButton *back=[self button:@"ВЕРНУТЬСЯ В GTA V ▶" click:@selector(toggle)];
  [stack addArrangedSubview:back];[back.heightAnchor constraintEqualToConstant:50].active=YES;
@@ -188,6 +205,70 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
   });
  }];
  [self.task resume];
+}
+- (BOOL)probeTargetHost:(NSString **)host port:(uint16_t *)port {
+ NSString *input=[self.host.text stringByTrimmingCharactersInSet:
+                    NSCharacterSet.whitespaceAndNewlineCharacterSet];
+ NSArray<NSString *> *parts=[input componentsSeparatedByString:@":"];
+ if(parts.count>2 || parts.firstObject.length==0 ||
+    [parts.firstObject containsString:@"/"] ||
+    [parts.firstObject containsString:@" "]){
+  return NO;
+ }
+ NSInteger number=parts.count==2?[parts.lastObject integerValue]:22005;
+ if(number<1||number>65534)return NO;
+ *host=parts.firstObject;
+ *port=(uint16_t)number;
+ return YES;
+}
+- (void)rageAppend:(NSString *)line {
+ NSString *prior=self.rageInfo.text ?: @"";
+ self.rageInfo.text=prior.length?[prior stringByAppendingFormat:@"\n%@",line]:line;
+}
+- (void)rageProbe {
+ if(self.rageBusy)return;
+ NSString *host=nil;uint16_t port=0;
+ if(![self probeTargetHost:&host port:&port]){
+  self.rageInfo.text=@"Неверный адрес, укажи host:port";return;
+ }
+ self.rageBusy=YES;
+ self.rageInfo.text=[NSString stringWithFormat:@"Этап 1/3: %@:%u, одиночный RakNet OpenConnectionRequest1",
+                    host,port];
+ __weak typeof(self) weakSelf=self;
+ void (^log)(NSString *)=^(NSString *message){
+  dispatch_async(dispatch_get_main_queue(),^{
+   __strong typeof(weakSelf) owner=weakSelf;
+   if(owner)[owner rageAppend:message];
+  });
+ };
+ RPRaknetOpenProbe(host,port,log,^{
+  dispatch_async(dispatch_get_main_queue(),^{weakSelf.rageBusy=NO;});
+ });
+}
+- (void)resourcesAppend:(NSString *)line {
+ NSString *prior=self.resourcesInfo.text ?: @"";
+ self.resourcesInfo.text=prior.length?[prior stringByAppendingFormat:@"\n%@",line]:line;
+}
+- (void)resourcesProbe {
+ if(self.resourcesBusy)return;
+ NSString *host=nil;uint16_t port=0;
+ if(![self probeTargetHost:&host port:&port]){
+  self.resourcesInfo.text=@"Неверный адрес, укажи host:port";return;
+ }
+ uint16_t resourcePort=port+1;
+ self.resourcesBusy=YES;
+ self.resourcesInfo.text=[NSString stringWithFormat:@"Проверка TCP %@:%u…",
+                         host,resourcePort];
+ __weak typeof(self) weakSelf=self;
+ void (^log)(NSString *)=^(NSString *message){
+  dispatch_async(dispatch_get_main_queue(),^{
+   __strong typeof(weakSelf) owner=weakSelf;
+   if(owner)[owner resourcesAppend:message];
+  });
+ };
+ RPRageResourcePortProbe(host,resourcePort,log,^{
+  dispatch_async(dispatch_get_main_queue(),^{weakSelf.resourcesBusy=NO;});
+ });
 }
 - (void)nativeStunLog:(NSString *)message {
  NSString *old=self.nativeStunInfo.text ?: @"";
