@@ -132,48 +132,7 @@ struct GameFile: Decodable {
     }
 }
 struct ContentView: View {
-    @AppStorage("gameServer") private var gameServer = ""
-    @AppStorage("manifestAddress") private var manifestAddress = ""
-    @StateObject private var assets = GameAssets()
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text("GTA5RP Mobile").font(.largeTitle.bold())
-                    Text("Тестовый лаунчер ресурсов").foregroundStyle(.secondary)
-                    Text("Игровой движок и сетевой протокол GTA5RP в эту сборку не включены.")
-                        .foregroundStyle(.orange).font(.subheadline)
-                }
-                Section("Подключение") {
-                    TextField("Адрес игрового сервера",text:$gameServer)
-                        .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    LabeledContent("Игровой клиент",value:"Не подключён")
-                }
-                Section("Файлы игры") {
-                    TextField("https://example.com/rp/manifest.json",text:$manifestAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled().keyboardType(.URL)
-                    Button("Получить список файлов") {
-                        Task { await assets.load(manifestAddress) }
-                    }.disabled(assets.busy || manifestAddress.isEmpty)
-                    Button("Скачать / проверить ресурсы") {
-                        Task { await assets.download() }
-                    }.disabled(assets.busy)
-                    if assets.busy { ProgressView() }
-                    Text(assets.status).font(.headline)
-                    Text(assets.progress).foregroundStyle(.secondary).font(.caption)
-                }
-                Section("Папка ресурсов") {
-                    Text("Файлы → На iPhone → GTA5RP Mobile → RPResources")
-                        .font(.subheadline)
-                    Text("Скачанное не импортируется в стороннюю GTA автоматически.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("GTA5RP Mobile")
-            .navigationBarTitleDisplayMode(.inline)
-        }.preferredColorScheme(.dark)
-    }
+    var body: some View { MainDashboard() }
 }
 @main struct GTA5RPLauncher: App {
     var body: some Scene { WindowGroup { ContentView() } }

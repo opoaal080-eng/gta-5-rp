@@ -15,6 +15,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Prepare GTA5RP branding
+        run: bash ios-launcher/generate-assets.sh
       - name: Generate iOS project
         run: |
           cd ios-launcher
