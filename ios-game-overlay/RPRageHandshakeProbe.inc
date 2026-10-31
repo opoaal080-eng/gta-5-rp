@@ -1,7 +1,7 @@
 // One-shot, user-initiated, *unauthenticated* RakNet initial probe.
 // This is generic RakNet 0x05/0x06/0x19, NOT the proprietary RAGE MP client handshake.
 #import <Network/Network.h>
-static void RPRaknetOpenProbe(NSString *host, uint16_t port,
+static void RPRaknetOpenProbeSingle(NSString *host, uint16_t port, NSUInteger mtu,
                              void (^log)(NSString *), void (^done)(void)) {
  dispatch_queue_t queue=dispatch_queue_create("fun.nightwell.raknet.probe",DISPATCH_QUEUE_SERIAL);
  nw_endpoint_t endpoint=nw_endpoint_create_host(host.UTF8String,
@@ -19,11 +19,11 @@ static void RPRaknetOpenProbe(NSString *host, uint16_t port,
   nw_connection_cancel(connection);
   done();
  };
- dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),
+ dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),
                              DISPATCH_TIME_FOREVER,100*NSEC_PER_MSEC);
  dispatch_source_set_event_handler(timer,^{
-  log(@"RakNet: тайм-аут 5 с, ответа на 0x05 нет.");
-  log(@"Итог: это НЕ подтверждает блокировку и НЕ является игровой авторизацией.");
+  log([NSString stringWithFormat:@"RakNet MTU %lu: тайм-аут 2 с",(unsigned long)mtu]);
+  log(@"Отсутствие ответа не доказывает блокировку или несовместимость сервера.");
   finish();
  });
  dispatch_resume(timer);
@@ -40,7 +40,7 @@ static void RPRaknetOpenProbe(NSString *host, uint16_t port,
   } else if(state==nw_connection_state_ready){
    const uint8_t magic[16]={0,255,255,0,254,254,254,254,
                             253,253,253,253,18,52,86,120};
-   NSMutableData *packet=[NSMutableData dataWithLength:1200];
+   NSMutableData *packet=[NSMutableData dataWithLength:mtu];
    uint8_t *p=(uint8_t *)packet.mutableBytes;
    p[0]=0x05;
    memcpy(p+1,magic,16);
@@ -101,16 +101,36 @@ static void RPRaknetOpenProbe(NSString *host, uint16_t port,
                                nw_error_get_error_code(sendError)]);
      finish();
     } else {
-     log(@"Отправлен OpenConnectionRequest1: версия 9, MTU 1200, ID 0x05");
+     log([NSString stringWithFormat:@"OpenConnectionRequest1 отправлен: версия 9, MTU %lu, ID 0x05",(unsigned long)mtu]);
     }
    });
   }
  });
  nw_connection_start(connection);
 }
+static void RPRaknetOpenProbe(NSString *host, uint16_t port,
+                             void (^log)(NSString *),void (^done)(void)) {
+ // Three sequential, bounded probes. No authentication, no 0x07 or game sync.
+ NSArray<NSNumber *> *sizes=@[@576,@1200,@1400];
+ __block NSUInteger index=0;
+ __block void (^next)(void)=nil;
+ next=^{
+  if(index>=sizes.count){
+   log(@"Итог: все три MTU проверены. Тайм-ауты не означают невозможность входа в GTA5RP.");
+   done();
+   next=nil;return;
+  }
+  NSUInteger mtu=sizes[index++].unsignedIntegerValue;
+  log([NSString stringWithFormat:@"MTU %lu: начинаем проверку %lu/3",
+                    (unsigned long)mtu,(unsigned long)index]);
+  RPRaknetOpenProbeSingle(host,port,mtu,log,^{next();});
+ };
+ next();
+}
+// Only HEAD / is sent. No client_resources files or bodies are downloaded.
 static void RPRageResourcePortProbe(NSString *host,uint16_t port,
                                    void (^log)(NSString *),void (^done)(void)) {
- dispatch_queue_t queue=dispatch_queue_create("fun.nightwell.rage.resources",DISPATCH_QUEUE_SERIAL);
+ dispatch_queue_t queue=dispatch_queue_create("fun.nightwell.rage.httphead",DISPATCH_QUEUE_SERIAL);
  nw_endpoint_t target=nw_endpoint_create_host(host.UTF8String,
                                   [NSString stringWithFormat:@"%u",port].UTF8String);
  nw_parameters_t params=nw_parameters_create_secure_tcp(
@@ -126,18 +146,68 @@ static void RPRageResourcePortProbe(NSString *host,uint16_t port,
   nw_connection_cancel(conn);
   done();
  };
- dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,4*NSEC_PER_SEC),
+ dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),
                           DISPATCH_TIME_FOREVER,NSEC_PER_SEC/10);
  dispatch_source_set_event_handler(timer,^{
-  log(@"TCP порт ресурсов: тайм-аут 4 с. Это не доказывает отсутствие файлов.");
+  log(@"TCP/HTTP HEAD: тайм-аут 5 с. Это не доказывает недоступность ресурсов.");
   finish();
  });
  dispatch_resume(timer);
  nw_connection_set_state_changed_handler(conn,^(nw_connection_state_t state,nw_error_t error){
   if(finished)return;
   if(state==nw_connection_state_ready){
-   log([NSString stringWithFormat:@"✓ TCP %u доступен, но HTTP и ресурсы не проверены",port]);
-   finish();
+   log([NSString stringWithFormat:@"✓ TCP %u подключен",port]);
+   NSString *head=[NSString stringWithFormat:
+          @"HEAD / HTTP/1.1\r\nHost: %@:%u\r\nUser-Agent: GTA5RPOnlineLab/0.9\r\nAccept: */*\r\nConnection: close\r\n\r\n",host,port];
+   NSData *encoded=[head dataUsingEncoding:NSUTF8StringEncoding];
+   nw_connection_receive(conn,1,8192,^(dispatch_data_t bytes,
+                                        nw_content_context_t context,
+                                        bool complete,nw_error_t receiveError){
+    if(finished)return;
+    if(receiveError){
+     log([NSString stringWithFormat:@"HTTP HEAD: ошибка ответа %d",nw_error_get_error_code(receiveError)]);
+     finish();return;
+    }
+    if(!bytes){log(@"HTTP HEAD: пустой ответ");finish();return;}
+    const void *buf=NULL;size_t count=0;
+    dispatch_data_t mapped=dispatch_data_create_map(bytes,&buf,&count);
+    (void)mapped;
+    NSData *data=[NSData dataWithBytes:buf length:count];
+    NSString *response=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding];
+    if(!response){log(@"HTTP HEAD: ответ не является текстовым HTTP");finish();return;}
+    NSArray<NSString *> *lines=[response componentsSeparatedByString:@"\r\n"];
+    NSString *first=lines.count?lines.firstObject:@"";
+    if(![first hasPrefix:@"HTTP/"]){
+     log([NSString stringWithFormat:@"Необычный ответ порта %u: %@",port,
+                        [first substringToIndex:MIN((NSUInteger)120,first.length)]]);
+     finish();return;
+    }
+    log([NSString stringWithFormat:@"HTTP HEAD: %@",first]);
+    for(NSString *line in lines){
+     NSString *lower=line.lowercaseString;
+     if([lower hasPrefix:@"content-type:"]||[lower hasPrefix:@"content-length:"]||
+        [lower hasPrefix:@"location:"]){
+      log([line substringToIndex:MIN((NSUInteger)200,line.length)]);
+     }
+    }
+    log(@"Проверены только заголовки HTTP, не игровые ресурсы.");
+    finish();
+   });
+   void *buf=malloc(encoded.length);
+   if(!buf){log(@"HTTP HEAD: ошибка памяти");finish();return;}
+   memcpy(buf,encoded.bytes,encoded.length);
+   dispatch_data_t payload=dispatch_data_create(buf,encoded.length,queue,^{free(buf);});
+   nw_connection_send(conn,payload,NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT,true,
+     ^(nw_error_t sendError){
+      if(finished)return;
+      if(sendError){
+       log([NSString stringWithFormat:@"HTTP HEAD: отправка не удалась (%d)",
+                           nw_error_get_error_code(sendError)]);
+       finish();
+      }else{
+       log(@"Отправлен HEAD / без загрузки данных");
+      }
+     });
   }else if(state==nw_connection_state_failed){
    log([NSString stringWithFormat:@"TCP %u ошибка %d",port,
           error?nw_error_get_error_code(error):0]);
