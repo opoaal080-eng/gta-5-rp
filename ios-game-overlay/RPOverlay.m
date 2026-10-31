@@ -66,7 +66,7 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  launch.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:launch];
  [NSLayoutConstraint activateConstraints:@[
  [launch.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12],
- [launch.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:6],
+ [launch.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-18],
  [launch.widthAnchor constraintEqualToConstant:78],
  [launch.heightAnchor constraintEqualToConstant:44]]];
  UIView *menu=[UIView new];self.menu=menu;menu.hidden=YES;menu.backgroundColor=dark();
@@ -189,26 +189,59 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
 @interface RPBoot : NSObject @end
 @implementation RPBoot
 static RPHUDWindow *activeWindow=nil;
+static NSInteger installAttempts=0;
 + (void)load {
+ // UIKit scene lifecycle can start AFTER the injected dylib +load callback.
+ // Never create a detached UIWindow; do not mark a failed install successful.
  dispatch_async(dispatch_get_main_queue(), ^{
-  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(activated:) name:UIApplicationDidBecomeActiveNotification object:nil];
-  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(activated:) name:UISceneDidActivateNotification object:nil];
-  [self install:0];
+  NSArray<NSNotificationName> *signals=@[
+    UIApplicationDidBecomeActiveNotification,
+    UISceneDidActivateNotification,
+    UISceneWillEnterForegroundNotification,
+    UIWindowDidBecomeVisibleNotification
+  ];
+  for(NSNotificationName name in signals)
+   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(activated:) name:name object:nil];
+  [self install];
  });
 }
-+ (void)activated:(NSNotification *)note{[self install:0];}
-+ (void)install:(NSInteger)attempt {
- if(activeWindow||attempt>60)return;
++ (void)activated:(NSNotification *)note {
+ dispatch_async(dispatch_get_main_queue(), ^{ [self install]; });
+}
++ (void)install {
+ if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self install];});return;}
  UIWindowScene *scene=nil;
- for(UIScene *candidate in UIApplication.sharedApplication.connectedScenes)
-  if([candidate isKindOfClass:UIWindowScene.class]&&candidate.activationState==UISceneActivationStateForegroundActive){scene=(UIWindowScene*)candidate;break;}
- if(!scene&&UIApplication.sharedApplication.windows.count==0){
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1*NSEC_PER_SEC),dispatch_get_main_queue(),^{[self install:attempt+1];});return;
+ UIWindow *gameWindow=nil;
+ for(UIScene *candidate in UIApplication.sharedApplication.connectedScenes){
+  if(![candidate isKindOfClass:UIWindowScene.class])continue;
+  if(candidate.activationState!=UISceneActivationStateForegroundActive)continue;
+  UIWindowScene *candidateScene=(UIWindowScene*)candidate;
+  for(UIWindow *window in candidateScene.windows){
+   if(window==activeWindow||window.hidden||window.alpha<0.05)continue;
+   if(!gameWindow||window.isKeyWindow)gameWindow=window;
+  }
+  if(gameWindow){scene=candidateScene;break;}
  }
- RPHUDWindow *window=scene?[[RPHUDWindow alloc]initWithWindowScene:scene]:[[RPHUDWindow alloc]initWithFrame:UIScreen.mainScreen.bounds];
- window.frame=scene?scene.coordinateSpace.bounds:UIScreen.mainScreen.bounds;
- window.backgroundColor=UIColor.clearColor;window.windowLevel=UIWindowLevelAlert+4;
- RPHUDController *controller=[RPHUDController new];window.rootViewController=controller;controller.overlay=window;
- window.hidden=NO;[window layoutIfNeeded];window.launcher=controller.launchButton;activeWindow=window;
+ if(!scene){
+  if(installAttempts++<120)
+   dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(NSEC_PER_SEC/2)),dispatch_get_main_queue(),^{[self install];});
+  return;
+ }
+ installAttempts=0;
+ if(activeWindow && activeWindow.windowScene==scene && !activeWindow.hidden)return;
+ if(activeWindow){activeWindow.hidden=YES;activeWindow=nil;}
+ RPHUDWindow *window=[[RPHUDWindow alloc]initWithWindowScene:scene];
+ window.frame=scene.coordinateSpace.bounds;
+ window.backgroundColor=UIColor.clearColor;
+ window.windowLevel=UIWindowLevelAlert+8;
+ RPHUDController *controller=[RPHUDController new];
+ window.rootViewController=controller;
+ controller.overlay=window;
+ (void)controller.view; // Force viewDidLoad to create the control before assigning hit-testing.
+ window.launcher=controller.launchButton;
+ activeWindow=window;
+ window.hidden=NO;
+ [window layoutIfNeeded];
+ NSLog(@"[GTA5RP Overlay] Installed in active UIWindowScene %@, button=%@",scene,window.launcher);
 }
 @end
