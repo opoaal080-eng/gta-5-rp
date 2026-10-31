@@ -141,7 +141,7 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  self.networkInfo=[self label:@"Ожидается адрес сервера" size:14];[stack addArrangedSubview:self.networkInfo];
  UILabel *stage=[self label:@"НАЧАЛЬНЫЙ ОБМЕН RAKNET" size:20];
  stage.textColor=orange();[stack addArrangedSubview:stage];
- UIButton *startProbe=[self button:@"ПРОВЕРИТЬ MTU 576 / 1200 / 1400" click:@selector(rageProbe)];
+ UIButton *startProbe=[self button:@"ПРОВЕРИТЬ UDP ДЛИНЫ 576 / 1200 / 1400" click:@selector(rageProbe)];
  [stack addArrangedSubview:startProbe];
  [startProbe.heightAnchor constraintEqualToConstant:50].active=YES;
  self.rageInfo=[self label:@"Этап 0/3: ещё не проверен" size:14];
@@ -269,7 +269,7 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
   self.rageInfo.text=@"Неверный адрес, укажи host:port";return;
  }
  self.rageBusy=YES;
- self.rageInfo.text=[NSString stringWithFormat:@"Этап 1/3: %@:%u, три MTU по очереди (один запрос на каждый)",
+ self.rageInfo.text=[NSString stringWithFormat:@"Этап 1/3: %@:%u, три длины UDP (по одному запросу)",
                     host,port];
  __weak typeof(self) weakSelf=self;
  void (^log)(NSString *)=^(NSString *message){
