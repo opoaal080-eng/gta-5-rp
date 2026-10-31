@@ -22,7 +22,7 @@ static void RPRaknetOpenProbeSingle(NSString *host, uint16_t port, NSUInteger mt
  dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),
                              DISPATCH_TIME_FOREVER,100*NSEC_PER_MSEC);
  dispatch_source_set_event_handler(timer,^{
-  log([NSString stringWithFormat:@"RakNet MTU %lu: тайм-аут 2 с",(unsigned long)mtu]);
+  log([NSString stringWithFormat:@"RakNet UDP-длина %lu: тайм-аут 2 с",(unsigned long)mtu]);
   log(@"Отсутствие ответа не доказывает блокировку или несовместимость сервера.");
   finish();
  });
@@ -101,7 +101,7 @@ static void RPRaknetOpenProbeSingle(NSString *host, uint16_t port, NSUInteger mt
                                nw_error_get_error_code(sendError)]);
      finish();
     } else {
-     log([NSString stringWithFormat:@"OpenConnectionRequest1 отправлен: версия 9, MTU %lu, ID 0x05",(unsigned long)mtu]);
+     log([NSString stringWithFormat:@"OpenConnectionRequest1 отправлен: версия 9, UDP-длина %lu, ID 0x05",(unsigned long)mtu]);
     }
    });
   }
@@ -110,18 +110,19 @@ static void RPRaknetOpenProbeSingle(NSString *host, uint16_t port, NSUInteger mt
 }
 static void RPRaknetOpenProbe(NSString *host, uint16_t port,
                              void (^log)(NSString *),void (^done)(void)) {
- // Three sequential, bounded probes. No authentication, no 0x07 or game sync.
+ // Three sequential bounded UDP datagram lengths, not measurements of path MTU.
+ // No authentication, no 0x07 or game sync.
  NSArray<NSNumber *> *sizes=@[@576,@1200,@1400];
  __block NSUInteger index=0;
  __block void (^next)(void)=nil;
  next=^{
   if(index>=sizes.count){
-   log(@"Итог: все три MTU проверены. Тайм-ауты не означают невозможность входа в GTA5RP.");
+   log(@"Итог: все три длины UDP проверены. Тайм-ауты не доказывают невозможность входа в GTA5RP.");
    done();
    next=nil;return;
   }
   NSUInteger mtu=sizes[index++].unsignedIntegerValue;
-  log([NSString stringWithFormat:@"MTU %lu: начинаем проверку %lu/3",
+  log([NSString stringWithFormat:@"UDP длина %lu: начинаем проверку %lu/3",
                     (unsigned long)mtu,(unsigned long)index]);
   RPRaknetOpenProbeSingle(host,port,mtu,log,^{next();});
  };
