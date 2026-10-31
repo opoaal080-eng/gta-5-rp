@@ -1,0 +1,62 @@
+name: Build iOS IPA (private game engine required)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'apply_patch.py'
+      - 'tools/RPAddon.swift'
+      - '.github/workflows/build-ipa.yml'
+jobs:
+  build:
+    if: github.event.repository.private == true
+    runs-on: macos-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install rustup xcodegen binaryen
+          rustup toolchain install 1.98.1
+          rustup target add aarch64-apple-ios --toolchain 1.98.1
+          echo "$(brew --prefix rustup)/bin" >> "$GITHUB_PATH"
+      - name: Fetch owned game engine
+        shell: bash
+        env:
+          GAME_WASM_URL: ${{ secrets.GAME_WASM_URL }}
+          GAME_WASM_SHA256: ${{ secrets.GAME_WASM_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$GAME_WASM_URL" && test -n "$GAME_WASM_SHA256"
+          curl -fsSL --retry 3 -o game.wasm "$GAME_WASM_URL"
+          echo "$GAME_WASM_SHA256  game.wasm" | shasum -a 256 -c -
+          test "$(stat -f%z game.wasm)" -gt 1000000
+      - name: Clone pinned Muguet and patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/c22dev/muguet.git muguet
+          cd muguet
+          git checkout 728c195ab02c746a1f2d626238bfe030b2f561fb
+          cd ..
+          python3 apply_patch.py muguet
+      - name: Compile iOS IPA
+        shell: bash
+        env:
+          FREE: '1'
+          BUNDLE_ID: fun.nightwell.gtarplab
+        run: |
+          set -euo pipefail
+          cd muguet
+          ./make-ios.sh "${GITHUB_WORKSPACE}/game.wasm" --ipa
+      - name: Delete game input
+        if: always()
+        run: rm -f game.wasm
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: GTA5RP-Mobile-Lab-IPA
+          path: muguet/build/Muguet.ipa
+          retention-days: 2
+          if-no-files-found: error
