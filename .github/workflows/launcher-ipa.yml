@@ -1,0 +1,51 @@
+name: Build GTA5RP Mobile Launcher IPA
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios-launcher/**'
+      - '.github/workflows/launcher-ipa.yml'
+permissions:
+  contents: read
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate iOS project
+        run: |
+          cd ios-launcher
+          xcodegen generate
+      - name: Build iOS device app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios-launcher/GTA5RPLauncher.xcodeproj \
+            -scheme GTA5RPLauncher \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/gta5rp-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Package test IPA (ad-hoc; re-sign for installation)
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/gta5rp-derived/Build/Products/Release-iphoneos/GTA5RPLauncher.app"
+          test -f "$APP/GTA5RPLauncher"
+          mkdir -p Payload artifact
+          cp -R "$APP" Payload/
+          codesign --force --sign - "Payload/GTA5RPLauncher.app"
+          /usr/bin/zip -qyr artifact/GTA5RP-Mobile-Launcher.ipa Payload
+          unzip -t artifact/GTA5RP-Mobile-Launcher.ipa
+          ls -lh artifact/
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: GTA5RP-Mobile-Launcher-IPA
+          path: artifact/GTA5RP-Mobile-Launcher.ipa
+          if-no-files-found: error
+          retention-days: 14
