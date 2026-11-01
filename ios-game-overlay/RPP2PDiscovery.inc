@@ -37,7 +37,7 @@ static nw_browser_t RPP2PBrowse(void (^report)(NSString *),void (^complete)(void
  nw_browser_set_browse_results_changed_handler(browser,^(
            nw_browse_result_t old_result,nw_browse_result_t new_result,bool changes_complete){
   if(finished||!new_result)return;
-  nw_endpoint_t endpoint=nw_browse_result_get_endpoint(new_result);
+  nw_endpoint_t endpoint=nw_browse_result_copy_endpoint(new_result);
   if(!endpoint||nw_endpoint_get_type(endpoint)!=nw_endpoint_type_bonjour_service)return;
   const char *cname=nw_endpoint_get_bonjour_service_name(endpoint);
   NSString *name=cname?[NSString stringWithUTF8String:cname]:@"Неизвестный P2P хост";
