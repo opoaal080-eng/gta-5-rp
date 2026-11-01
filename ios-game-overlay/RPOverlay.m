@@ -10,6 +10,7 @@
 #include "RPStunProbe.inc"
 #include "RPStunNative.inc"
 #include "RPRageHandshakeProbe.inc"
+#include "RPP2PDiscovery.inc"
 static UIColor *orange(void){return [UIColor colorWithRed:1 green:.40 blue:.10 alpha:1];}
 static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.082 alpha:1];}
 @interface RPHUDWindow : UIWindow
@@ -35,6 +36,9 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
 @property(nonatomic,strong) UILabel *nativeStunInfo;
 @property(nonatomic,strong) UILabel *rageInfo;
 @property(nonatomic,strong) UILabel *resourcesInfo;
+@property(nonatomic,strong) UILabel *p2pInfo;
+@property(nonatomic,strong) nw_browser_t p2pBrowser;
+@property(nonatomic) BOOL p2pBusy;
 @property(nonatomic) BOOL stunBusy;
 @property(nonatomic) BOOL nativeStunBusy;
 @property(nonatomic) BOOL rageBusy;
@@ -113,7 +117,7 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-22],
  [stack.widthAnchor constraintLessThanOrEqualToConstant:590],
  [stack.widthAnchor constraintLessThanOrEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-36]]];
- UILabel *title=[self label:@"★ GTA5RP MOBILE v1.0" size:27];title.textColor=orange();
+ UILabel *title=[self label:@"★ GTA5RP MOBILE · FIVESTAR" size:27];title.textColor=orange();
  [stack addArrangedSubview:title];
  UILabel *sub=[self label:@"Диагностика RAGE MP поверх GTA V. Не является входом в игровую сессию." size:13];sub.textColor=UIColor.lightGrayColor;
  [stack addArrangedSubview:sub];
@@ -153,6 +157,13 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
  [stack addArrangedSubview:self.resourcesInfo];
  UILabel *notice=[self label:@"Проверки показывают только доступность сети. Официальный игровой handshake, авторизация и синхронизация GTA5RP пока НЕ реализованы. P2P-порт сохранён." size:13];
  notice.textColor=UIColor.lightGrayColor;[stack addArrangedSubview:notice];
+ UILabel *discoveryHeading=[self label:@"P2P-ПОИСК ИЗ ВТОРОГО ПОРТА" size:20];
+ discoveryHeading.textColor=orange();[stack addArrangedSubview:discoveryHeading];
+ UIButton *findPeers=[self button:@"НАЙТИ P2P-СЕССИИ В WI-FI" click:@selector(startP2PDiscovery)];
+ [stack addArrangedSubview:findPeers];
+ [findPeers.heightAnchor constraintEqualToConstant:50].active=YES;
+ self.p2pInfo=[self label:@"Ищем объявления _gtavmp._udp, используемые вторым iOS-портом. Просмотр игроков и вход в сессию пока не поддерживаются." size:13];
+ [stack addArrangedSubview:self.p2pInfo];
  UILabel *traceHeading=[self label:@"ДИАГНОСТИЧЕСКИЙ ОТЧЁТ" size:20];
  traceHeading.textColor=orange();[stack addArrangedSubview:traceHeading];
  UILabel *traceHint=[self label:@"Сохраняет только текст уже выполненных проверок. Отчёт может содержать внешний IP. Отправка происходит только по твоему выбору." size:12];
@@ -177,6 +188,23 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
   self.buttonBottom.active=YES;
  }
 }
+- (void)startP2PDiscovery {
+ if(self.p2pBusy)return;
+ self.p2pBusy=YES;
+ self.p2pInfo.text=@"Поиск _gtavmp._udp...";
+ __weak typeof(self) weakSelf=self;
+ void (^log)(NSString *)=^(NSString *line){
+  dispatch_async(dispatch_get_main_queue(),^{
+   __strong typeof(weakSelf) owner=weakSelf;if(!owner)return;
+   NSString *prior=owner.p2pInfo.text ?: @"";
+   owner.p2pInfo.text=prior.length?[prior stringByAppendingFormat:@"\n%@",line]:line;
+  });
+ };
+ self.p2pBrowser=RPP2PBrowse(log,^{
+  __strong typeof(weakSelf) owner=weakSelf;
+  if(owner){owner.p2pBusy=NO;owner.p2pBrowser=nil;}
+ });
+}
 - (void)exportDiagnostics {
  NSDateFormatter *df=[NSDateFormatter new];
  df.dateFormat=@"yyyy-MM-dd HH:mm:ss Z";
@@ -187,7 +215,8 @@ static UIColor *dark(void){return [UIColor colorWithRed:.065 green:.070 blue:.08
   @[@"STUN / BSD",self.stunInfo.text ?: @"not checked"],
   @[@"STUN / NETWORK.FRAMEWORK",self.nativeStunInfo.text ?: @"not checked"],
   @[@"RAKNET 0x05",self.rageInfo.text ?: @"not checked"],
-  @[@"HTTP RESOURCE HEAD",self.resourcesInfo.text ?: @"not checked"]
+  @[@"HTTP RESOURCE HEAD",self.resourcesInfo.text ?: @"not checked"],
+  @[@"P2P BONJOUR DISCOVERY",self.p2pInfo.text ?: @"not checked"]
  ];
  NSMutableString *report=[NSMutableString stringWithFormat:
    @"GTA5RP Online Lab v1.0 (experimental, no game connection)\nTimestamp: %@\nSelected server: %@\nAddress: %@\nDevice: %@ / iOS %@\n\n",
